@@ -14,10 +14,10 @@ export async function fetchProductsAction(): Promise<Product[]> {
   try {
     const productsCollection = await getProductsStore();
     const dbProducts = await productsCollection.find({}).sort({ name: 1 }).toArray();
-    return dbProducts.map(p => ({ ...p, id: p._id.toString() } as Product));
-  } catch (e) {
+    return dbProducts.map(p => ({ ...p, _id: p._id, id: p._id.toString() } as unknown as Product));
+  } catch (e: any) {
     console.error("Failed to fetch products from DB:", e);
-    throw new Error("Failed to load products from database.");
+    throw new Error(`Failed to load products from database. Original error: ${e.message || String(e)}`);
   }
 }
 
@@ -34,12 +34,13 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
     const result = await productsCollection.insertOne(productDocument as Omit<Product, 'id'>);
     const newProduct: Product = {
       ...productDocument,
+      _id: result.insertedId,
       id: result.insertedId.toString(),
-    };
+    } as unknown as Product;
     return newProduct;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Failed to add product to DB:", e);
-    throw new Error("Failed to add product to database.");
+    throw new Error(`Failed to add product to database. Original error: ${e.message || String(e)}`);
   }
 }
 
@@ -50,9 +51,9 @@ export async function updateProductStockAction(productId: string, newStockLevel:
       { _id: new ObjectId(productId) },
       { $set: { stockLevel: newStockLevel } }
     );
-  } catch (e) {
+  } catch (e: any) {
     console.error("Failed to update product stock in DB:", e);
-    throw new Error("Failed to update product stock in database.");
+    throw new Error(`Failed to update product stock in database. Original error: ${e.message || String(e)}`);
   }
 }
 
@@ -60,9 +61,9 @@ export async function deleteProductAction(productId: string): Promise<void> {
   try {
     const productsCollection = await getProductsStore();
     await productsCollection.deleteOne({ _id: new ObjectId(productId) });
-  } catch (e) {
+  } catch (e: any) {
     console.error("Failed to delete product from DB:", e);
-    throw new Error("Failed to delete product from database.");
+    throw new Error(`Failed to delete product from database. Original error: ${e.message || String(e)}`);
   }
 }
 
@@ -71,11 +72,12 @@ export async function getProductByIdAction(productId: string): Promise<Product |
     const productsCollection = await getProductsStore();
     const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
     if (product) {
-      return { ...product, id: product._id.toString() } as Product;
+      return { ...product, _id: product._id, id: product._id.toString() } as unknown as Product;
     }
     return null;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Failed to get product by ID from DB:", e);
-    throw new Error("Failed to get product by ID from database.");
+    throw new Error(`Failed to get product by ID from database. Original error: ${e.message || String(e)}`);
   }
 }
+
