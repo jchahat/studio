@@ -1,6 +1,7 @@
+
 "use client";
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useProducts } from '@/contexts/ProductContext';
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowUpDown, Search, PackagePlus, Edit, Trash2, Package } from 'lucide-react';
+import { ArrowUpDown, Search, PackagePlus, Edit, Trash2, Package, Loader2, AlertCircle } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,13 +23,25 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function ProductListPage() {
-  const { products, updateProductStock } = useProducts(); // Assuming deleteProduct will be added to context
+  const { products, deleteProduct, loading, error: contextError, refreshProducts } = useProducts();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Product | null; direction: 'ascending' | 'descending' }>({ key: 'name', direction: 'ascending' });
+  const [isDeleting, setIsDeleting] = useState<string | null>(null); // Track deleting product ID
+
+  useEffect(() => {
+    // If there was an error, provide a way to retry
+    if (contextError) {
+        toast({
+            title: "Error Loading Products",
+            description: "Could not load products from the database. Please try refreshing.",
+            variant: "destructive",
+        });
+    }
+  }, [contextError, toast]);
 
   const sortedProducts = useMemo(() => {
     let sortableProducts = [...products];
@@ -43,7 +56,6 @@ export default function ProductListPage() {
         if (typeof valA === 'number' && typeof valB === 'number') {
            return sortConfig.direction === 'ascending' ? valA - valB : valB - valA;
         }
-        // Fallback for mixed types or other types (less likely with Product interface)
         if (valA < valB) return sortConfig.direction === 'ascending' ? -1 : 1;
         if (valA > valB) return sortConfig.direction === 'ascending' ? 1 : -1;
         return 0;
@@ -64,18 +76,38 @@ export default function ProductListPage() {
     setSortConfig({ key, direction });
   };
 
-  const handleDeleteProduct = (productId: string) => {
-    // In a real app, this would call an API or context function to delete
-    console.log("Deleting product (simulated):", productId);
-    toast({
-      title: "Product Deleted (Simulated)",
-      description: `Product with ID ${productId} has been removed. This is a simulation; data persistence is not implemented.`,
-      variant: "destructive"
-    });
-    // Example: removeProduct(productId);
-    // For now, this is a placeholder as `deleteProduct` isn't in requirements for context
+  const handleDeleteProduct = async (productId: string, productName: string) => {
+    setIsDeleting(productId);
+    try {
+      await deleteProduct(productId);
+      toast({
+        title: "Product Deleted",
+        description: `Product "${productName}" has been successfully deleted.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Error Deleting Product",
+        description: `Could not delete "${productName}". Please try again.`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(null);
+    }
   };
 
+  const renderLoadingSkeletons = () => (
+    Array.from({ length: 5 }).map((_, index) => (
+      <TableRow key={`skeleton-${index}`}>
+        <TableCell className="hidden sm:table-cell"><Skeleton className="h-[64px] w-[64px] rounded-md" /></TableCell>
+        <TableCell><Skeleton className="h-4 w-3/4" /></TableCell>
+        <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-full" /></TableCell>
+        <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-1/2" /></TableCell>
+        <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell>
+        <TableCell className="text-right hidden sm:table-cell"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell>
+        <TableCell className="text-right"><div className="flex gap-1 justify-end"><Skeleton className="h-8 w-8 rounded" /><Skeleton className="h-8 w-8 rounded" /></div></TableCell>
+      </TableRow>
+    ))
+  );
 
   return (
     <div className="flex flex-col gap-8">
@@ -111,7 +143,37 @@ export default function ProductListPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {products.length === 0 ? (
+          {contextError && (
+            <div className="text-center py-12 text-destructive">
+                <AlertCircle className="mx-auto h-12 w-12" />
+                <h3 className="mt-2 text-sm font-semibold">Error Loading Products</h3>
+                <p className="mt-1 text-sm">{contextError}</p>
+                <Button onClick={refreshProducts} className="mt-4">
+                    <Loader2 className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Try Again
+                </Button>
+            </div>
+          )}
+          {!contextError && loading && products.length === 0 && (
+             <div className="overflow-x-auto">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead className="w-[80px] hidden sm:table-cell"></TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead className="hidden md:table-cell">Description</TableHead>
+                            <TableHead className="hidden lg:table-cell">Category</TableHead>
+                            <TableHead className="text-right">Stock</TableHead>
+                            <TableHead className="text-right hidden sm:table-cell">Reorder At</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {renderLoadingSkeletons()}
+                    </TableBody>
+                </Table>
+             </div>
+          )}
+          {!contextError && !loading && products.length === 0 && (
              <div className="text-center py-12">
                 <Package className="mx-auto h-12 w-12 text-muted-foreground" />
                 <h3 className="mt-2 text-sm font-semibold text-foreground">No products yet</h3>
@@ -125,7 +187,8 @@ export default function ProductListPage() {
                   </Link>
                 </div>
               </div>
-          ) : (
+          )}
+          {!contextError && sortedProducts.length > 0 && (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -167,14 +230,14 @@ export default function ProductListPage() {
                     <TableCell className="text-right hidden sm:table-cell">{product.reorderPoint}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="icon" disabled className="opacity-50 cursor-not-allowed"> {/* Edit functionality not implemented */}
+                        <Button variant="ghost" size="icon" disabled className="opacity-50 cursor-not-allowed">
                           <Edit className="h-4 w-4" />
                           <span className="sr-only">Edit</span>
                         </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                              <Trash2 className="h-4 w-4" />
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isDeleting === product.id}>
+                              {isDeleting === product.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                               <span className="sr-only">Delete</span>
                             </Button>
                           </AlertDialogTrigger>
@@ -182,15 +245,17 @@ export default function ProductListPage() {
                             <AlertDialogHeader>
                               <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                This action cannot be undone. This will (simulate) permanently deleting the product "{product.name}".
+                                This action cannot be undone. This will permanently delete the product "{product.name}" from the database.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>Cancel</AlertDialogCancel>
                               <AlertDialogAction
-                                onClick={() => handleDeleteProduct(product.id)}
+                                onClick={() => handleDeleteProduct(product.id, product.name)}
                                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                                disabled={isDeleting === product.id}
                               >
+                                {isDeleting === product.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                 Delete
                               </AlertDialogAction>
                             </AlertDialogFooter>

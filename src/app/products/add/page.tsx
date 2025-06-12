@@ -1,3 +1,4 @@
+
 "use client";
 
 import React from 'react';
@@ -14,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from 'next/navigation';
-import { PackagePlus } from 'lucide-react';
+import { PackagePlus, Loader2 } from 'lucide-react';
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -44,14 +45,22 @@ export default function AddProductPage() {
     },
   });
 
-  function onSubmit(values: ProductFormData) {
-    addProduct(values);
-    toast({
-      title: "Product Added!",
-      description: `${values.name} has been successfully added to the inventory.`,
-    });
-    form.reset();
-    router.push('/products');
+  async function onSubmit(values: ProductFormData) {
+    try {
+      await addProduct(values);
+      toast({
+        title: "Product Added!",
+        description: `${values.name} has been successfully added to the inventory.`,
+      });
+      form.reset();
+      router.push('/products');
+    } catch (error) {
+      toast({
+        title: "Error Adding Product",
+        description: "Could not add the product. Please try again.",
+        variant: "destructive",
+      });
+    }
   }
 
   return (
@@ -158,14 +167,19 @@ export default function AddProductPage() {
                       <Input placeholder="https://example.com/image.png" {...field} />
                     </FormControl>
                     <FormDescription>
-                      Use a placeholder like https://placehold.co/300x200.png if you don't have an image.
+                      Use a placeholder like https://placehold.co/300x200.png if you don't have an image. One will be generated if left blank.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
               <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? "Adding Product..." : "Add Product"}
+                {form.formState.isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Adding Product...
+                  </>
+                ) : "Add Product"}
               </Button>
             </form>
           </Form>

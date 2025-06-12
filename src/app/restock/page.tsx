@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -6,19 +7,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { RefreshCw, Package, PackagePlus } from 'lucide-react';
+import { RefreshCw, Package, PackagePlus, Loader2 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import Link from 'next/link';
 
 export default function RestockPage() {
-  const { products, updateProductStock, getProductById } = useProducts();
+  const { products, updateProductStock, getProductById, loading: productsLoading } = useProducts();
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
   const [quantity, setQuantity] = useState<number>(1);
+  const [isRestocking, setIsRestocking] = useState(false);
   const { toast } = useToast();
 
   const selectedProduct = selectedProductId ? getProductById(selectedProductId) : undefined;
 
-  const handleRestock = () => {
+  const handleRestock = async () => {
     if (!selectedProductId || !selectedProduct) {
       toast({
         title: "Error",
@@ -36,16 +38,37 @@ export default function RestockPage() {
       return;
     }
 
-    const newStockLevel = selectedProduct.stockLevel + quantity;
-    updateProductStock(selectedProductId, newStockLevel);
-    toast({
-      title: "Restock Successful!",
-      description: `${quantity} units of ${selectedProduct.name} added. New stock: ${newStockLevel}.`,
-    });
-    setQuantity(1); // Reset quantity
+    setIsRestocking(true);
+    try {
+      const newStockLevel = selectedProduct.stockLevel + quantity;
+      await updateProductStock(selectedProductId, newStockLevel);
+      toast({
+        title: "Restock Successful!",
+        description: `${quantity} units of ${selectedProduct.name} added. New stock: ${newStockLevel}.`,
+      });
+      setQuantity(1); // Reset quantity
+      // No need to reset selectedProductId, user might want to restock same item more
+    } catch (error) {
+      toast({
+        title: "Restock Failed",
+        description: "Could not update stock levels. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRestocking(false);
+    }
   };
   
-  if (products.length === 0) {
+  if (productsLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] text-center">
+        <Loader2 className="w-16 h-16 text-muted-foreground animate-spin mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">Loading Products...</h2>
+      </div>
+    );
+  }
+
+  if (products.length === 0 && !productsLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-200px)] text-center">
         <Package className="w-16 h-16 text-muted-foreground mb-4" />
@@ -82,7 +105,7 @@ export default function RestockPage() {
           <div>
             <label htmlFor="product-select" className="block text-sm font-medium mb-1">Product</label>
             <Select onValueChange={setSelectedProductId} value={selectedProductId}>
-              <SelectTrigger id="product-select">
+              <SelectTrigger id="product-select" disabled={isRestocking}>
                 <SelectValue placeholder="Select a product" />
               </SelectTrigger>
               <SelectContent>
@@ -111,11 +134,13 @@ export default function RestockPage() {
               value={quantity}
               onChange={(e) => setQuantity(parseInt(e.target.value, 10) || 1)}
               min="1"
+              disabled={isRestocking || !selectedProductId}
             />
           </div>
           
-          <Button onClick={handleRestock} className="w-full" disabled={!selectedProductId}>
-            <RefreshCw className="mr-2 h-4 w-4" /> Restock
+          <Button onClick={handleRestock} className="w-full" disabled={!selectedProductId || isRestocking}>
+            {isRestocking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            {isRestocking ? "Restocking..." : "Restock"}
           </Button>
         </CardContent>
       </Card>
