@@ -6,7 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { FileText, Layers, Package, BarChart3 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82Ca9D', '#FF5733', '#C70039'];
+// Updated COLORS to align with the new theme's chart variables
+const COLORS = [
+  'hsl(210, 70%, 60%)', // Corresponds to --chart-1
+  'hsl(30, 90%, 65%)',  // Corresponds to --chart-2
+  'hsl(160, 60%, 45%)', // Corresponds to --chart-3
+  'hsl(270, 60%, 65%)', // Corresponds to --chart-4
+  'hsl(0, 70%, 60%)',   // Corresponds to --chart-5
+  'hsl(240, 60%, 60%)', // Additional color if needed
+  'hsl(50, 80%, 55%)'   // Additional color if needed
+];
 
 export default function ReportsPage() {
   const { products } = useProducts();
@@ -84,7 +93,7 @@ export default function ReportsPage() {
                     cy="50%"
                     labelLine={false}
                     outerRadius={100}
-                    fill="#8884d8"
+                    fill="#8884d8" /* Default fill, overridden by Cell */
                     dataKey="value"
                     label={({ name, percent, value }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
                   >
