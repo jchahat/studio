@@ -3,27 +3,27 @@
 
 import type { Product, ProductFormData } from '@/types';
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
-import { connectToDatabase } from '@/lib/mongodb';
-import { Collection, ObjectId } from 'mongodb';
+import { 
+  fetchProductsAction, 
+  addProductAction, 
+  updateProductStockAction, 
+  deleteProductAction,
+  getProductByIdAction
+} from '@/actions/productActions';
 
 interface ProductContextType {
   products: Product[];
-  addProduct: (productData: ProductFormData) => Promise<void>;
+  addProduct: (productData: ProductFormData) => Promise<Product | void>; // Can return product or void on error
   updateProductStock: (productId: string, newStockLevel: number) => Promise<void>;
   deleteProduct: (productId: string) => Promise<void>;
-  getProductById: (productId: string) => Product | undefined;
+  getProductById: (productId: string) => Product | undefined; // Keep this sync for local cache access
+  fetchProductByIdFromServer: (productId: string) => Promise<Product | null>; // New async fetcher
   loading: boolean;
   error: string | null;
   refreshProducts: () => Promise<void>;
 }
 
 const ProductContext = createContext<ProductContextType | undefined>(undefined);
-
-async function getProductsStore(): Promise<Collection<Omit<Product, 'id'>>> {
-  const { db } = await connectToDatabase();
-  return db.collection<Omit<Product, 'id'>>('products');
-}
-
 
 export const ProductProvider = ({ children }: { children: ReactNode }) => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -34,13 +34,12 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     setError(null);
     try {
-      const productsCollection = await getProductsStore();
-      const dbProducts = await productsCollection.find({}).toArray();
-      setProducts(dbProducts.map(p => ({ ...p, id: p._id.toString() } as Product)));
-    } catch (e) {
-      console.error("Failed to fetch products:", e);
-      setError("Failed to load products from database.");
-      setProducts([]); // Clear products on error
+      const dbProducts = await fetchProductsAction();
+      setProducts(dbProducts);
+    } catch (e: any) {
+      console.error("ProductContext: Failed to refresh products:", e);
+      setError(e.message || "Failed to load products from database.");
+      setProducts([]); 
     } finally {
       setLoading(false);
     }
@@ -51,69 +50,88 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
   }, [refreshProducts]);
 
   const addProduct = async (productData: ProductFormData) => {
+    setLoading(true);
     setError(null);
     try {
-      const productsCollection = await getProductsStore();
-      // Ensure stockLevel and reorderPoint are numbers
-      const productDocument = {
-        ...productData,
-        stockLevel: Number(productData.stockLevel),
-        reorderPoint: Number(productData.reorderPoint),
-        imageUrl: productData.imageUrl || `https://placehold.co/100x100.png?text=${productData.name.charAt(0)}`,
-      };
-
-      const result = await productsCollection.insertOne(productDocument as Omit<Product, 'id'>);
-      const newProduct: Product = {
-        ...productDocument,
-        id: result.insertedId.toString(),
-      };
+      const newProduct = await addProductAction(productData);
       setProducts((prevProducts) => [...prevProducts, newProduct]);
-    } catch (e) {
-      console.error("Failed to add product:", e);
-      setError("Failed to add product to database.");
-      throw e; // Re-throw to be caught by the calling form
+      setLoading(false);
+      return newProduct;
+    } catch (e: any) {
+      console.error("ProductContext: Failed to add product:", e);
+      setError(e.message || "Failed to add product to database.");
+      setLoading(false);
+      throw e; 
     }
   };
 
   const updateProductStock = async (productId: string, newStockLevel: number) => {
+    // Optimistic update can be added here if desired
     setError(null);
     try {
-      const productsCollection = await getProductsStore();
-      await productsCollection.updateOne(
-        { _id: new ObjectId(productId) },
-        { $set: { stockLevel: newStockLevel } }
-      );
+      await updateProductStockAction(productId, newStockLevel);
       setProducts((prevProducts) =>
         prevProducts.map((p) =>
           p.id === productId ? { ...p, stockLevel: newStockLevel } : p
         )
       );
-    } catch (e) {
-      console.error("Failed to update product stock:", e);
-      setError("Failed to update product stock in database.");
+    } catch (e: any) {
+      console.error("ProductContext: Failed to update product stock:", e);
+      setError(e.message || "Failed to update product stock in database.");
+      await refreshProducts(); // Re-fetch to ensure consistency on error
       throw e;
     }
   };
 
   const deleteProduct = async (productId: string) => {
+    // Optimistic update can be added here
     setError(null);
     try {
-      const productsCollection = await getProductsStore();
-      await productsCollection.deleteOne({ _id: new ObjectId(productId) });
-      setProducts((prevProducts) => prevProducts.filter(p => p.id !== productId));
-    } catch (e) {
-      console.error("Failed to delete product:", e);
-      setError("Failed to delete product from database.");
+      setProducts((prevProducts) => prevProducts.filter(p => p.id !== productId)); // Optimistic UI update
+      await deleteProductAction(productId);
+      // If server action fails, refreshProducts will correct the state.
+      // Or, add more specific error handling to revert optimistic update.
+    } catch (e: any) {
+      console.error("ProductContext: Failed to delete product:", e);
+      setError(e.message || "Failed to delete product from database.");
+      await refreshProducts(); // Re-fetch to ensure consistency
       throw e;
     }
   };
 
-  const getProductById = (productId: string) => {
+  const getProductById = (productId: string): Product | undefined => {
     return products.find(p => p.id === productId);
   };
 
+  const fetchProductByIdFromServer = async (productId: string): Promise<Product | null> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const product = await getProductByIdAction(productId);
+      // Optionally update local cache if needed, though usually not for a single get
+      setLoading(false);
+      return product;
+    } catch (e: any) {
+      console.error("ProductContext: Failed to fetch product by ID:", e);
+      setError(e.message || `Failed to fetch product ${productId}`);
+      setLoading(false);
+      return null;
+    }
+  };
+
+
   return (
-    <ProductContext.Provider value={{ products, addProduct, updateProductStock, deleteProduct, getProductById, loading, error, refreshProducts }}>
+    <ProductContext.Provider value={{ 
+      products, 
+      addProduct, 
+      updateProductStock, 
+      deleteProduct, 
+      getProductById, 
+      fetchProductByIdFromServer,
+      loading, 
+      error, 
+      refreshProducts 
+    }}>
       {children}
     </ProductContext.Provider>
   );
