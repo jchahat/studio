@@ -1,12 +1,12 @@
 
 "use client";
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useProducts } from '@/contexts/ProductContext';
-import type { ProductFormData } from '@/types';
+import type { Product, ProductFormData } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -14,8 +14,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useRouter } from 'next/navigation';
-import { PackagePlus, Loader2, DollarSign, Percent } from 'lucide-react';
+import { useRouter, useParams } from 'next/navigation';
+import { Edit, Loader2, PackageOpen, DollarSign, Percent, AlertCircle } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -30,10 +31,16 @@ const productSchema = z.object({
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
 
-export default function AddProductPage() {
-  const { addProduct } = useProducts();
+export default function EditProductPage() {
+  const { updateProduct, fetchProductByIdFromServer, getProductById } = useProducts();
   const { toast } = useToast();
   const router = useRouter();
+  const params = useParams();
+  const productId = params.productId as string;
+
+  const [product, setProduct] = useState<Product | null | undefined>(undefined); // undefined for loading, null for not found
+  const [isLoadingProduct, setIsLoadingProduct] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
@@ -49,38 +56,128 @@ export default function AddProductPage() {
     },
   });
 
+  useEffect(() => {
+    if (productId) {
+      // Try to get from local cache first for speed
+      const cachedProduct = getProductById(productId);
+      if (cachedProduct) {
+        setProduct(cachedProduct);
+        form.reset(cachedProduct);
+        setIsLoadingProduct(false);
+      } else {
+        // Fetch from server if not in cache or for fresher data
+        setIsLoadingProduct(true);
+        setFetchError(null);
+        fetchProductByIdFromServer(productId)
+          .then(data => {
+            if (data) {
+              setProduct(data);
+              form.reset(data); // Populate form with fetched data
+            } else {
+              setProduct(null); // Product not found
+              setFetchError(`Product with ID ${productId} not found.`);
+            }
+          })
+          .catch(err => {
+            console.error("Error fetching product:", err);
+            setProduct(null);
+            setFetchError(err.message || "Failed to load product details.");
+          })
+          .finally(() => setIsLoadingProduct(false));
+      }
+    }
+  }, [productId, fetchProductByIdFromServer, form, getProductById]);
+
   async function onSubmit(values: ProductFormData) {
+    if (!productId || !product) return;
     try {
-      await addProduct(values);
+      await updateProduct(productId, values);
       toast({
-        title: "Product Added!",
-        description: `${values.name} has been successfully added to the inventory.`,
+        title: "Product Updated!",
+        description: `${values.name} has been successfully updated.`,
       });
-      form.reset();
       router.push('/products');
     } catch (error: any) {
       toast({
-        title: "Error Adding Product",
-        description: error.message || "Could not add the product. Please try again.",
+        title: "Error Updating Product",
+        description: error.message || "Could not update the product. Please try again.",
         variant: "destructive",
       });
     }
   }
 
+  if (isLoadingProduct) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="flex items-center gap-4 mb-8">
+          <PackageOpen className="h-8 w-8 text-primary" />
+          <div>
+            <h1 className="text-3xl font-bold font-headline">Edit Product</h1>
+             <Skeleton className="h-4 w-48 mt-1" />
+          </div>
+        </div>
+        <Card className="shadow-lg">
+          <CardHeader>
+            <Skeleton className="h-6 w-1/3 mb-1" />
+            <Skeleton className="h-4 w-2/3" />
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-20 w-full" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-24" />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-10">
+        <AlertCircle className="mx-auto h-12 w-12 text-destructive mb-4" />
+        <h1 className="text-2xl font-bold text-destructive mb-2">Error Loading Product</h1>
+        <p className="text-muted-foreground mb-6">{fetchError}</p>
+        <Button onClick={() => router.push('/products')}>Back to Products</Button>
+      </div>
+    );
+  }
+  
+  if (!product) {
+     return (
+      <div className="max-w-2xl mx-auto text-center py-10">
+        <PackageOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        <h1 className="text-2xl font-bold mb-2">Product Not Found</h1>
+        <p className="text-muted-foreground mb-6">The product you are trying to edit could not be found.</p>
+        <Button onClick={() => router.push('/products')}>Back to Products</Button>
+      </div>
+    );
+  }
+
+
   return (
     <div className="max-w-2xl mx-auto">
       <div className="flex items-center gap-4 mb-8">
-        <PackagePlus className="h-8 w-8 text-primary" />
+        <Edit className="h-8 w-8 text-primary" />
         <div>
-          <h1 className="text-3xl font-bold font-headline">Add New Product</h1>
-          <p className="text-muted-foreground">Fill in the details to add a new item to your inventory.</p>
+          <h1 className="text-3xl font-bold font-headline">Edit Product</h1>
+          <p className="text-muted-foreground">Modify the details for "{product.name}".</p>
         </div>
       </div>
       
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle>Product Details</CardTitle>
-          <CardDescription>Enter information for the new product.</CardDescription>
+          <CardDescription>Update the information for this product.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -118,7 +215,7 @@ export default function AddProductPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Price</FormLabel>
-                      <FormControl>
+                       <FormControl>
                         <div className="relative">
                            <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                            <Input type="number" step="0.01" placeholder="0.00" {...field} className="pl-8" />
@@ -140,7 +237,7 @@ export default function AddProductPage() {
                            <Input type="number" step="1" placeholder="0" {...field} className="pl-8" />
                         </div>
                       </FormControl>
-                       <FormDescription>Enter a value between 0 and 100.</FormDescription>
+                      <FormDescription>Enter a value between 0 and 100.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -152,7 +249,7 @@ export default function AddProductPage() {
                   name="stockLevel"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Initial Stock Level</FormLabel>
+                      <FormLabel>Stock Level</FormLabel>
                       <FormControl>
                         <Input type="number" placeholder="0" {...field} />
                       </FormControl>
@@ -205,7 +302,7 @@ export default function AddProductPage() {
                     <FormControl>
                       <Input placeholder="https://example.com/image.png" {...field} />
                     </FormControl>
-                    <FormDescription>
+                     <FormDescription>
                       Use a placeholder like https://placehold.co/300x200.png or leave blank for an auto-generated one.
                     </FormDescription>
                     <FormMessage />
@@ -216,9 +313,9 @@ export default function AddProductPage() {
                 {form.formState.isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Adding Product...
+                    Saving Changes...
                   </>
-                ) : "Add Product"}
+                ) : "Save Changes"}
               </Button>
             </form>
           </Form>

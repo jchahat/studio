@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -17,14 +18,19 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { Box, LayoutDashboard, Package, RefreshCw, Lightbulb, FileText, Menu, X, PackagePlus, List } from 'lucide-react';
+import { Box, LayoutDashboard, Package, RefreshCw, Lightbulb, FileText, Menu, X, PackagePlus, List, Edit } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/products', label: 'Products', icon: Package, subItems: [
-    { href: '/products', label: 'Product List', icon: List },
-    { href: '/products/add', label: 'Add Product', icon: PackagePlus },
-  ]},
+  { 
+    href: '/products', 
+    label: 'Products', 
+    icon: Package, 
+    subItems: [
+      { href: '/products', label: 'Product List', icon: List },
+      { href: '/products/add', label: 'Add Product', icon: PackagePlus },
+    ]
+  },
   { href: '/restock', label: 'Restock Simulator', icon: RefreshCw },
   { href: '/recommendations', label: 'Item Pairing', icon: Lightbulb },
   { href: '/reports', label: 'Reports', icon: FileText },
@@ -58,39 +64,51 @@ function AppSidebar() {
       </SidebarHeader>
       <SidebarContent className="flex-1 overflow-y-auto">
         <SidebarMenu>
-          {navItems.map((item) => (
-            <SidebarMenuItem key={item.href}>
-              <SidebarMenuButton
-                asChild
-                isActive={pathname === item.href || (item.subItems && pathname.startsWith(item.href) && !item.subItems.some(sub => sub.href === pathname))}
-                tooltip={item.label}
-              >
-                <Link href={item.href} onClick={handleLinkClick}>
-                  <item.icon />
-                  <span>{item.label}</span>
-                </Link>
-              </SidebarMenuButton>
-              {item.subItems && (state === 'expanded' || isMobile) && (pathname === item.href || pathname.startsWith(item.href)) && (
-                <ul className="pl-6 pt-1 space-y-1">
-                  {item.subItems.map(subItem => (
-                  <SidebarMenuItem key={subItem.href}>
-                     <SidebarMenuButton
-                        asChild
-                        isActive={pathname === subItem.href}
-                        variant="ghost"
-                        size="sm"
-                      >
-                      <Link href={subItem.href} onClick={handleLinkClick} className="flex items-center gap-2">
-                        <subItem.icon className="w-3.5 h-3.5" />
-                        <span>{subItem.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                   </SidebarMenuItem>
-                  ))}
-                </ul>
-              )}
-            </SidebarMenuItem>
-          ))}
+          {navItems.map((item) => {
+            // Determine if the main item or any sub-item is active
+            // Special handling for /products/edit/[productId] to keep "Products" active
+            let isActiveParent = pathname === item.href || 
+                                (item.href === '/products' && pathname.startsWith('/products'));
+
+            if (item.subItems && !isActiveParent) {
+               isActiveParent = item.subItems.some(sub => pathname.startsWith(sub.href)) && item.href === '/products';
+            }
+
+
+            return (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={isActiveParent && !(item.subItems && item.subItems.some(sub => sub.href === pathname && sub.href !== item.href))}
+                  tooltip={item.label}
+                >
+                  <Link href={item.href} onClick={handleLinkClick}>
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+                {item.subItems && (state === 'expanded' || isMobile) && isActiveParent && (
+                  <ul className="pl-6 pt-1 space-y-1">
+                    {item.subItems.map(subItem => (
+                    <SidebarMenuItem key={subItem.href}>
+                       <SidebarMenuButton
+                          asChild
+                          isActive={pathname === subItem.href}
+                          variant="ghost"
+                          size="sm"
+                        >
+                        <Link href={subItem.href} onClick={handleLinkClick} className="flex items-center gap-2">
+                          <subItem.icon className="w-3.5 h-3.5" />
+                          <span>{subItem.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                     </SidebarMenuItem>
+                    ))}
+                  </ul>
+                )}
+              </SidebarMenuItem>
+            );
+          })}
         </SidebarMenu>
       </SidebarContent>
       <SidebarFooter className="p-4">

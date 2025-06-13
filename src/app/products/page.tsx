@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowUpDown, Search, PackagePlus, Edit, Trash2, Package, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowUpDown, Search, PackagePlus, Edit, Trash2, Package, Loader2, AlertCircle, DollarSign } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,16 +24,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 
 export default function ProductListPage() {
   const { products, deleteProduct, loading, error: contextError, refreshProducts } = useProducts();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortConfig, setSortConfig] = useState<{ key: keyof Product | null; direction: 'ascending' | 'descending' }>({ key: 'name', direction: 'ascending' });
-  const [isDeleting, setIsDeleting] = useState<string | null>(null); // Track deleting product ID
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Product | 'discountedPrice' | null; direction: 'ascending' | 'descending' }>({ key: 'name', direction: 'ascending' });
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    // If there was an error, provide a way to retry
     if (contextError) {
         toast({
             title: "Error Loading Products",
@@ -43,12 +43,23 @@ export default function ProductListPage() {
     }
   }, [contextError, toast]);
 
+  const calculateDiscountedPrice = (product: Product): number => {
+    const discount = product.discountPercentage ?? 0;
+    return product.price * (1 - discount / 100);
+  };
+
   const sortedProducts = useMemo(() => {
     let sortableProducts = [...products];
     if (sortConfig.key) {
       sortableProducts.sort((a, b) => {
-        const valA = a[sortConfig.key!];
-        const valB = b[sortConfig.key!];
+        let valA, valB;
+        if (sortConfig.key === 'discountedPrice') {
+            valA = calculateDiscountedPrice(a);
+            valB = calculateDiscountedPrice(b);
+        } else {
+            valA = a[sortConfig.key as keyof Product];
+            valB = b[sortConfig.key as keyof Product];
+        }
 
         if (typeof valA === 'string' && typeof valB === 'string') {
           return sortConfig.direction === 'ascending' ? valA.localeCompare(valB) : valB.localeCompare(valA);
@@ -56,6 +67,7 @@ export default function ProductListPage() {
         if (typeof valA === 'number' && typeof valB === 'number') {
            return sortConfig.direction === 'ascending' ? valA - valB : valB - valA;
         }
+        // Fallback for other types or mixed types - this might need refinement based on actual data
         if (valA < valB) return sortConfig.direction === 'ascending' ? -1 : 1;
         if (valA > valB) return sortConfig.direction === 'ascending' ? 1 : -1;
         return 0;
@@ -64,11 +76,12 @@ export default function ProductListPage() {
     return sortableProducts.filter(product =>
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.description.toLowerCase().includes(searchTerm.toLowerCase())
+      product.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(product.price).includes(searchTerm)
     );
   }, [products, searchTerm, sortConfig]);
 
-  const requestSort = (key: keyof Product) => {
+  const requestSort = (key: keyof Product | 'discountedPrice') => {
     let direction: 'ascending' | 'descending' = 'ascending';
     if (sortConfig.key === key && sortConfig.direction === 'ascending') {
       direction = 'descending';
@@ -84,10 +97,10 @@ export default function ProductListPage() {
         title: "Product Deleted",
         description: `Product "${productName}" has been successfully deleted.`,
       });
-    } catch (err) {
+    } catch (err: any) {
       toast({
         title: "Error Deleting Product",
-        description: `Could not delete "${productName}". Please try again.`,
+        description: err.message || `Could not delete "${productName}". Please try again.`,
         variant: "destructive",
       });
     } finally {
@@ -102,8 +115,9 @@ export default function ProductListPage() {
         <TableCell><Skeleton className="h-4 w-3/4" /></TableCell>
         <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-full" /></TableCell>
         <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-1/2" /></TableCell>
-        <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell>
-        <TableCell className="text-right hidden sm:table-cell"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell>
+        <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell> {/* Price */}
+        <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell> {/* Stock */}
+        <TableCell className="text-right hidden sm:table-cell"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell> {/* Reorder */}
         <TableCell className="text-right"><div className="flex gap-1 justify-end"><Skeleton className="h-8 w-8 rounded" /><Skeleton className="h-8 w-8 rounded" /></div></TableCell>
       </TableRow>
     ))
@@ -114,7 +128,7 @@ export default function ProductListPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold font-headline">Product Inventory</h1>
-          <p className="text-muted-foreground">Manage your product stock and details.</p>
+          <p className="text-muted-foreground">Manage your product stock, prices, and details.</p>
         </div>
         <Link href="/products/add">
           <Button>
@@ -148,7 +162,7 @@ export default function ProductListPage() {
                 <AlertCircle className="mx-auto h-12 w-12" />
                 <h3 className="mt-2 text-sm font-semibold">Error Loading Products</h3>
                 <p className="mt-1 text-sm">{contextError}</p>
-                <Button onClick={refreshProducts} className="mt-4">
+                <Button onClick={refreshProducts} className="mt-4" disabled={loading}>
                     <Loader2 className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Try Again
                 </Button>
             </div>
@@ -162,6 +176,7 @@ export default function ProductListPage() {
                             <TableHead>Name</TableHead>
                             <TableHead className="hidden md:table-cell">Description</TableHead>
                             <TableHead className="hidden lg:table-cell">Category</TableHead>
+                            <TableHead className="text-right">Price</TableHead>
                             <TableHead className="text-right">Stock</TableHead>
                             <TableHead className="text-right hidden sm:table-cell">Reorder At</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
@@ -201,6 +216,9 @@ export default function ProductListPage() {
                   <TableHead onClick={() => requestSort('category')} className="cursor-pointer hover:bg-muted hidden lg:table-cell">
                     Category <ArrowUpDown className="ml-2 h-4 w-4 inline" />
                   </TableHead>
+                  <TableHead onClick={() => requestSort('discountedPrice')} className="cursor-pointer hover:bg-muted text-right">
+                    Price <ArrowUpDown className="ml-2 h-4 w-4 inline" />
+                  </TableHead>
                   <TableHead onClick={() => requestSort('stockLevel')} className="cursor-pointer hover:bg-muted text-right">
                     Stock <ArrowUpDown className="ml-2 h-4 w-4 inline" />
                   </TableHead>
@@ -211,7 +229,9 @@ export default function ProductListPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedProducts.map((product) => (
+                {sortedProducts.map((product) => {
+                  const discountedPrice = calculateDiscountedPrice(product);
+                  return (
                   <TableRow key={product.id} className={product.stockLevel <= product.reorderPoint ? 'bg-destructive/10 hover:bg-destructive/20' : 'hover:bg-muted/50'}>
                     <TableCell className="hidden sm:table-cell">
                       <Image
@@ -226,19 +246,34 @@ export default function ProductListPage() {
                     <TableCell className="font-medium">{product.name}</TableCell>
                     <TableCell className="hidden md:table-cell max-w-xs truncate">{product.description}</TableCell>
                     <TableCell className="hidden lg:table-cell">{product.category}</TableCell>
+                    <TableCell className="text-right">
+                        {product.discountPercentage && product.discountPercentage > 0 ? (
+                            <div className="flex flex-col items-end">
+                                <span className="text-sm text-destructive line-through">
+                                    ${product.price.toFixed(2)}
+                                </span>
+                                <span className="font-semibold text-primary">
+                                    ${discountedPrice.toFixed(2)}
+                                </span>
+                                <Badge variant="destructive" className="mt-1">-{product.discountPercentage}%</Badge>
+                            </div>
+                        ) : (
+                            `$${product.price.toFixed(2)}`
+                        )}
+                    </TableCell>
                     <TableCell className="text-right">{product.stockLevel}</TableCell>
                     <TableCell className="text-right hidden sm:table-cell">{product.reorderPoint}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="icon" disabled className="opacity-50 cursor-not-allowed">
-                          <Edit className="h-4 w-4" />
-                          <span className="sr-only">Edit</span>
-                        </Button>
+                        <Link href={`/products/edit/${product.id}`} passHref>
+                          <Button variant="ghost" size="icon" aria-label={`Edit ${product.name}`}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </Link>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isDeleting === product.id}>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" disabled={isDeleting === product.id} aria-label={`Delete ${product.name}`}>
                               {isDeleting === product.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                              <span className="sr-only">Delete</span>
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
@@ -264,7 +299,7 @@ export default function ProductListPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                )})}
               </TableBody>
             </Table>
           </div>

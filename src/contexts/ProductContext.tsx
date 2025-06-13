@@ -1,11 +1,12 @@
 
 "use client";
 
-import type { Product, ProductFormData } from '@/types';
+import type { Product, ProductFormData, ProductUpdateData } from '@/types';
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
 import { 
   fetchProductsAction, 
   addProductAction, 
+  updateProductAction,
   updateProductStockAction, 
   deleteProductAction,
   getProductByIdAction
@@ -13,11 +14,12 @@ import {
 
 interface ProductContextType {
   products: Product[];
-  addProduct: (productData: ProductFormData) => Promise<Product | void>; // Can return product or void on error
+  addProduct: (productData: ProductFormData) => Promise<Product | void>;
+  updateProduct: (productId: string, productData: ProductUpdateData) => Promise<Product | void>;
   updateProductStock: (productId: string, newStockLevel: number) => Promise<void>;
   deleteProduct: (productId: string) => Promise<void>;
-  getProductById: (productId: string) => Product | undefined; // Keep this sync for local cache access
-  fetchProductByIdFromServer: (productId: string) => Promise<Product | null>; // New async fetcher
+  getProductById: (productId: string) => Product | undefined; 
+  fetchProductByIdFromServer: (productId: string) => Promise<Product | null>;
   loading: boolean;
   error: string | null;
   refreshProducts: () => Promise<void>;
@@ -54,7 +56,7 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
     setError(null);
     try {
       const newProduct = await addProductAction(productData);
-      setProducts((prevProducts) => [...prevProducts, newProduct]);
+      setProducts((prevProducts) => [...prevProducts, newProduct].sort((a, b) => a.name.localeCompare(b.name)));
       setLoading(false);
       return newProduct;
     } catch (e: any) {
@@ -65,8 +67,28 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const updateProduct = async (productId: string, productData: ProductUpdateData) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const updatedProduct = await updateProductAction(productId, productData);
+      if (updatedProduct) {
+        setProducts((prevProducts) =>
+          prevProducts.map((p) => (p.id === productId ? updatedProduct : p)).sort((a,b) => a.name.localeCompare(b.name))
+        );
+      }
+      setLoading(false);
+      return updatedProduct || undefined;
+    } catch (e: any) {
+      console.error("ProductContext: Failed to update product:", e);
+      setError(e.message || "Failed to update product in database.");
+      setLoading(false);
+      await refreshProducts(); // Re-fetch on error
+      throw e;
+    }
+  };
+
   const updateProductStock = async (productId: string, newStockLevel: number) => {
-    // Optimistic update can be added here if desired
     setError(null);
     try {
       await updateProductStockAction(productId, newStockLevel);
@@ -78,23 +100,20 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
     } catch (e: any) {
       console.error("ProductContext: Failed to update product stock:", e);
       setError(e.message || "Failed to update product stock in database.");
-      await refreshProducts(); // Re-fetch to ensure consistency on error
+      await refreshProducts(); 
       throw e;
     }
   };
 
   const deleteProduct = async (productId: string) => {
-    // Optimistic update can be added here
     setError(null);
     try {
-      setProducts((prevProducts) => prevProducts.filter(p => p.id !== productId)); // Optimistic UI update
+      setProducts((prevProducts) => prevProducts.filter(p => p.id !== productId)); 
       await deleteProductAction(productId);
-      // If server action fails, refreshProducts will correct the state.
-      // Or, add more specific error handling to revert optimistic update.
     } catch (e: any) {
       console.error("ProductContext: Failed to delete product:", e);
       setError(e.message || "Failed to delete product from database.");
-      await refreshProducts(); // Re-fetch to ensure consistency
+      await refreshProducts(); 
       throw e;
     }
   };
@@ -108,7 +127,6 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
     setError(null);
     try {
       const product = await getProductByIdAction(productId);
-      // Optionally update local cache if needed, though usually not for a single get
       setLoading(false);
       return product;
     } catch (e: any) {
@@ -119,11 +137,11 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-
   return (
     <ProductContext.Provider value={{ 
       products, 
       addProduct, 
+      updateProduct,
       updateProductStock, 
       deleteProduct, 
       getProductById, 
