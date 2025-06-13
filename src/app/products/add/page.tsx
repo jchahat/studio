@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from 'next/navigation';
-import { PackagePlus, Loader2, DollarSign, Percent } from 'lucide-react';
+import { PackagePlus, Loader2, DollarSign, Percent, Image as ImageIcon } from 'lucide-react';
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -25,7 +25,18 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  imageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal('')),
+  imageUrls: z.string().optional().refine(value => {
+    if (!value || value.trim() === '') return true; // Optional, so empty is fine
+    // Check if all comma-separated values are valid URLs
+    return value.split(',').every(url => {
+      try {
+        new URL(url.trim());
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }, { message: "Please enter valid URLs, separated by commas." }).or(z.literal('')),
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
@@ -45,7 +56,7 @@ export default function AddProductPage() {
       stockLevel: 0,
       reorderPoint: 0,
       category: '',
-      imageUrl: '',
+      imageUrls: '',
     },
   });
 
@@ -198,15 +209,18 @@ export default function AddProductPage() {
               />
               <FormField
                 control={form.control}
-                name="imageUrl"
+                name="imageUrls"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Image URL (Optional)</FormLabel>
+                    <FormLabel>Image URLs (Optional)</FormLabel>
                     <FormControl>
-                      <Input placeholder="https://example.com/image.png" {...field} />
+                      <div className="relative">
+                        <ImageIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input placeholder="https://example.com/image1.png, https://placehold.co/300x200.png" {...field} className="pl-8"/>
+                      </div>
                     </FormControl>
                     <FormDescription>
-                      Use a placeholder like https://placehold.co/300x200.png or leave blank for an auto-generated one.
+                      Enter comma-separated URLs. Use placeholders like https://placehold.co/300x200.png or leave blank.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

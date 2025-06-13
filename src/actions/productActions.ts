@@ -24,8 +24,18 @@ function mongoDocToProduct(doc: any): Product {
     stockLevel: Number(doc.stockLevel),
     reorderPoint: Number(doc.reorderPoint),
     category: doc.category,
-    imageUrl: doc.imageUrl || `https://placehold.co/300x200.png`,
+    imageUrls: Array.isArray(doc.imageUrls) && doc.imageUrls.length > 0 
+                 ? doc.imageUrls 
+                 : [`https://placehold.co/300x200.png?text=${encodeURIComponent(doc.name) || 'Product'}`],
   };
+}
+
+function parseImageUrls(urlsString?: string, productName?: string): string[] {
+  if (urlsString && urlsString.trim() !== '') {
+    const urls = urlsString.split(',').map(url => url.trim()).filter(url => url !== '');
+    if (urls.length > 0) return urls;
+  }
+  return [`https://placehold.co/300x200.png?text=${encodeURIComponent(productName || 'Product')}`];
 }
 
 
@@ -43,6 +53,8 @@ export async function fetchProductsAction(): Promise<Product[]> {
 export async function addProductAction(productData: ProductFormData): Promise<Product> {
   try {
     const productsCollection = await getProductsStore();
+    const parsedImageUrls = parseImageUrls(productData.imageUrls, productData.name);
+
     const productDocument = {
       name: productData.name,
       description: productData.description,
@@ -51,7 +63,7 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
       stockLevel: Number(productData.stockLevel),
       reorderPoint: Number(productData.reorderPoint),
       category: productData.category,
-      imageUrl: productData.imageUrl || `https://placehold.co/300x200.png`,
+      imageUrls: parsedImageUrls,
     };
 
     const result = await productsCollection.insertOne(productDocument as Omit<Product, 'id'>);
@@ -66,7 +78,7 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
       stockLevel: productDocument.stockLevel,
       reorderPoint: productDocument.reorderPoint,
       category: productDocument.category,
-      imageUrl: productDocument.imageUrl,
+      imageUrls: productDocument.imageUrls,
     };
     return newProduct;
   } catch (e: any) {
@@ -80,24 +92,22 @@ export async function updateProductAction(productId: string, productData: Produc
     const productsCollection = await getProductsStore();
     
     const updateDocument: Partial<Omit<Product, 'id'>> = {};
-    // Only include fields that are present in productData
     if (productData.name !== undefined) updateDocument.name = productData.name;
     if (productData.description !== undefined) updateDocument.description = productData.description;
     if (productData.price !== undefined) updateDocument.price = Number(productData.price);
     if (productData.discountPercentage !== undefined) {
         updateDocument.discountPercentage = Number(productData.discountPercentage);
-    } else if (productData.hasOwnProperty('discountPercentage')) { // handles case where it's explicitly set to null/undefined
+    } else if (productData.hasOwnProperty('discountPercentage')) { 
         updateDocument.discountPercentage = 0;
     }
     if (productData.stockLevel !== undefined) updateDocument.stockLevel = Number(productData.stockLevel);
     if (productData.reorderPoint !== undefined) updateDocument.reorderPoint = Number(productData.reorderPoint);
     if (productData.category !== undefined) updateDocument.category = productData.category;
-    if (productData.imageUrl !== undefined) {
-      updateDocument.imageUrl = productData.imageUrl || `https://placehold.co/300x200.png`;
+    if (productData.imageUrls !== undefined) {
+      updateDocument.imageUrls = parseImageUrls(productData.imageUrls, productData.name);
     }
     
     if (Object.keys(updateDocument).length === 0) {
-        // No fields to update, fetch and return current product
         return getProductByIdAction(productId);
     }
 

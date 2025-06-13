@@ -67,7 +67,6 @@ export default function ProductListPage() {
         if (typeof valA === 'number' && typeof valB === 'number') {
            return sortConfig.direction === 'ascending' ? valA - valB : valB - valA;
         }
-        // Fallback for other types or mixed types - this might need refinement based on actual data
         if (valA < valB) return sortConfig.direction === 'ascending' ? -1 : 1;
         if (valA > valB) return sortConfig.direction === 'ascending' ? 1 : -1;
         return 0;
@@ -233,16 +232,20 @@ export default function ProductListPage() {
               <TableBody>
                 {sortedProducts.map((product) => {
                   const discountedPrice = calculateDiscountedPrice(product);
+                  const displayImageUrl = (product.imageUrls && product.imageUrls.length > 0)
+                    ? product.imageUrls[0]
+                    : `https://placehold.co/64x64.png?text=${product.name.charAt(0)}`;
                   return (
                   <TableRow key={product.id} className={product.stockLevel <= product.reorderPoint ? 'bg-destructive/10 hover:bg-destructive/20' : 'hover:bg-muted/50'}>
                     <TableCell className="hidden sm:table-cell">
                       <Image
-                        src={product.imageUrl || `https://placehold.co/64x64.png?text=${product.name.charAt(0)}`}
+                        src={displayImageUrl}
                         alt={product.name}
                         width={64}
                         height={64}
                         className="rounded-md object-cover aspect-square"
                         data-ai-hint="product item"
+                        onError={(e) => { e.currentTarget.src = `https://placehold.co/64x64.png?text=${product.name.charAt(0)}`;}}
                       />
                     </TableCell>
                     <TableCell className="font-medium">{product.name}</TableCell>
@@ -311,4 +314,3 @@ export default function ProductListPage() {
     </div>
   );
 }
-

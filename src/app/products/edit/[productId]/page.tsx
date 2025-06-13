@@ -15,7 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useParams } from 'next/navigation';
-import { Edit, Loader2, PackageOpen, DollarSign, Percent, AlertCircle } from 'lucide-react';
+import { Edit, Loader2, PackageOpen, DollarSign, Percent, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import NextImage from 'next/image';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const productSchema = z.object({
@@ -26,7 +27,17 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  imageUrl: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal('')),
+  imageUrls: z.string().optional().refine(value => {
+    if (!value || value.trim() === '') return true; 
+    return value.split(',').every(url => {
+      try {
+        new URL(url.trim());
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }, { message: "Please enter valid URLs, separated by commas." }).or(z.literal('')),
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
@@ -38,7 +49,7 @@ export default function EditProductPage() {
   const params = useParams();
   const productId = params.productId as string;
 
-  const [product, setProduct] = useState<Product | null | undefined>(undefined); // undefined for loading, null for not found
+  const [product, setProduct] = useState<Product | null | undefined>(undefined); 
   const [isLoadingProduct, setIsLoadingProduct] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -52,29 +63,34 @@ export default function EditProductPage() {
       stockLevel: 0,
       reorderPoint: 0,
       category: '',
-      imageUrl: '',
+      imageUrls: '',
     },
   });
 
+  const populateForm = (productData: Product) => {
+    form.reset({
+      ...productData,
+      imageUrls: productData.imageUrls?.join(', ') || '',
+    });
+  };
+
   useEffect(() => {
     if (productId) {
-      // Try to get from local cache first for speed
       const cachedProduct = getProductById(productId);
       if (cachedProduct) {
         setProduct(cachedProduct);
-        form.reset(cachedProduct);
+        populateForm(cachedProduct);
         setIsLoadingProduct(false);
       } else {
-        // Fetch from server if not in cache or for fresher data
         setIsLoadingProduct(true);
         setFetchError(null);
         fetchProductByIdFromServer(productId)
           .then(data => {
             if (data) {
               setProduct(data);
-              form.reset(data); // Populate form with fetched data
+              populateForm(data);
             } else {
-              setProduct(null); // Product not found
+              setProduct(null);
               setFetchError(`Product with ID ${productId} not found.`);
             }
           })
@@ -174,6 +190,28 @@ export default function EditProductPage() {
         </div>
       </div>
       
+      {product.imageUrls && product.imageUrls.length > 0 && (
+        <Card className="mb-6 shadow-md">
+            <CardHeader>
+                <CardTitle className="text-lg">Current Images</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-4">
+                {product.imageUrls.map((url, index) => (
+                    <NextImage
+                        key={index}
+                        src={url}
+                        alt={`${product.name} image ${index + 1}`}
+                        width={100}
+                        height={100}
+                        className="rounded-md object-cover aspect-square border"
+                        data-ai-hint="product item"
+                        onError={(e) => { e.currentTarget.src = 'https://placehold.co/100x100.png?text=Error'; }}
+                    />
+                ))}
+            </CardContent>
+        </Card>
+      )}
+
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle>Product Details</CardTitle>
@@ -277,7 +315,7 @@ export default function EditProductPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Category</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a category" />
@@ -295,15 +333,18 @@ export default function EditProductPage() {
               />
               <FormField
                 control={form.control}
-                name="imageUrl"
+                name="imageUrls"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Image URL (Optional)</FormLabel>
+                    <FormLabel>Image URLs (Optional)</FormLabel>
                     <FormControl>
-                      <Input placeholder="https://example.com/image.png" {...field} />
+                     <div className="relative">
+                        <ImageIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input placeholder="https://example.com/image1.png, https://placehold.co/image2.png" {...field} className="pl-8" />
+                      </div>
                     </FormControl>
                      <FormDescription>
-                      Use a placeholder like https://placehold.co/300x200.png or leave blank for an auto-generated one.
+                      Enter comma-separated URLs. Use placeholders like https://placehold.co/300x200.png or leave blank.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
