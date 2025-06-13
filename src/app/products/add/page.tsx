@@ -15,8 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from 'next/navigation';
-import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X } from 'lucide-react';
-import Image from 'next/image';
+import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X, Video } from 'lucide-react';
+import NextImage from 'next/image'; // Renamed to NextImage to avoid conflict
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -26,7 +26,7 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  imageUrls: z.string().optional(), // Will store comma-separated Data URIs or be empty
+  mediaUrls: z.string().optional(), // Stores comma-separated Data URIs from file uploads
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
@@ -35,8 +35,8 @@ export default function AddProductPage() {
   const { addProduct } = useProducts();
   const { toast } = useToast();
   const router = useRouter();
-  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]); // To hold File objects
 
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
@@ -48,63 +48,71 @@ export default function AddProductPage() {
       stockLevel: 0,
       reorderPoint: 0,
       category: '',
-      imageUrls: '',
+      mediaUrls: '',
     },
   });
 
-  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files) {
-      const newPreviews: string[] = [];
-      const newImageFiles: File[] = Array.from(files);
-      
-      setImageFiles(newImageFiles);
+      const newStagedFiles = Array.from(files);
+      setStagedFiles(newStagedFiles);
 
-      newImageFiles.forEach(file => {
+      const newPreviews: string[] = [];
+      if (newStagedFiles.length === 0) {
+        setMediaPreviews([]);
+        return;
+      }
+
+      newStagedFiles.forEach(file => {
         const reader = new FileReader();
         reader.onloadend = () => {
           newPreviews.push(reader.result as string);
-          if (newPreviews.length === newImageFiles.length) {
-            setImagePreviews([...newPreviews]);
+          if (newPreviews.length === newStagedFiles.length) {
+            setMediaPreviews(newPreviews);
           }
         };
         reader.readAsDataURL(file);
       });
-      if (newImageFiles.length === 0) { // Handle case where all files are deselected
-        setImagePreviews([]);
-      }
     }
   };
 
-  const removeImage = (index: number) => {
-    const newImageFiles = [...imageFiles];
-    const newImagePreviews = [...imagePreviews];
-    newImageFiles.splice(index, 1);
-    newImagePreviews.splice(index, 1);
-    setImageFiles(newImageFiles);
-    setImagePreviews(newImagePreviews);
+  const removeMediaPreview = (index: number) => {
+    const newStagedFiles = [...stagedFiles];
+    const newMediaPreviews = [...mediaPreviews];
+    
+    newStagedFiles.splice(index, 1);
+    newMediaPreviews.splice(index, 1);
+    
+    setStagedFiles(newStagedFiles);
+    setMediaPreviews(newMediaPreviews);
 
-    // Update the underlying file input if possible (this is tricky and often not fully supported)
-    // For simplicity, we manage file list in state and construct imageUrls on submit.
+    // If all files are removed, clear the file input value
+    const fileInput = document.getElementById('media-upload') as HTMLInputElement;
+    if (fileInput && newStagedFiles.length === 0) {
+        fileInput.value = ""; 
+    }
   };
 
   async function onSubmit(values: ProductFormData) {
     try {
-      // Convert imageFiles to Data URIs and join them
-      const dataUris = await Promise.all(
-        imageFiles.map(file => {
-          return new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-        })
-      );
+      let mediaDataUris: string[] = [];
+      if (stagedFiles.length > 0) {
+        mediaDataUris = await Promise.all(
+          stagedFiles.map(file => {
+            return new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+          })
+        );
+      }
       
       const submissionValues = {
         ...values,
-        imageUrls: dataUris.join(','),
+        mediaUrls: mediaDataUris.join(','), // Send Data URIs as a comma-separated string
       };
 
       await addProduct(submissionValues);
@@ -113,8 +121,10 @@ export default function AddProductPage() {
         description: `${values.name} has been successfully added to the inventory.`,
       });
       form.reset();
-      setImagePreviews([]);
-      setImageFiles([]);
+      setMediaPreviews([]);
+      setStagedFiles([]);
+      const fileInput = document.getElementById('media-upload') as HTMLInputElement;
+      if (fileInput) fileInput.value = "";
       router.push('/products');
     } catch (error: any) {
       toast({
@@ -256,42 +266,50 @@ export default function AddProductPage() {
               />
               <FormField
                 control={form.control}
-                name="imageUrls" 
-                render={({ field }) => ( 
+                name="mediaUrls" 
+                render={({ field }) => ( // field.value will be a string of comma-separated Data URIs on submit
                   <FormItem>
-                    <FormLabel>Product Images (Optional)</FormLabel>
+                    <FormLabel>Product Media (Images/Videos)</FormLabel>
                     <FormControl>
                       <div className="flex items-center gap-2">
                         <UploadCloud className="h-5 w-5 text-muted-foreground" />
                         <Input 
+                          id="media-upload"
                           type="file" 
                           multiple 
-                          accept="image/*"
-                          onChange={handleImageChange}
+                          accept="image/*,video/*" // Accept images and videos
+                          onChange={handleFileChange}
                           className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
                         />
                       </div>
                     </FormControl>
                     <FormDescription>
-                      Upload one or more images for the product. Re-uploading will replace existing selections.
+                      Upload one or more images or videos for the product. Re-uploading will replace existing selections.
                     </FormDescription>
                     <FormMessage />
-                    {imagePreviews.length > 0 && (
-                      <div className="mt-4 grid grid-cols-3 gap-4">
-                        {imagePreviews.map((src, index) => (
-                          <div key={index} className="relative group">
-                            <Image src={src} alt={`Preview ${index + 1}`} width={100} height={100} className="rounded-md object-cover aspect-square border" data-ai-hint="product item"/>
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="icon"
-                              className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => removeImage(index)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))}
+                    {mediaPreviews.length > 0 && (
+                      <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        {mediaPreviews.map((src, index) => {
+                          const isVideo = src.startsWith('data:video');
+                          return (
+                            <div key={index} className="relative group aspect-square">
+                              {isVideo ? (
+                                <video src={src} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
+                              ) : (
+                                <NextImage src={src} alt={`Preview ${index + 1}`} layout="fill" objectFit="cover" className="rounded-md border" data-ai-hint="product item" onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}/>
+                              )}
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="icon"
+                                className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                onClick={() => removeMediaPreview(index)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </FormItem>

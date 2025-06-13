@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useProducts } from '@/contexts/ProductContext';
-import type { Product, ProductFormData } from '@/types';
+import type { Product, ProductFormData } from '@/types'; // ProductFormData is fine for edit too
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useParams } from 'next/navigation';
-import { Edit, Loader2, PackageOpen, DollarSign, Percent, AlertCircle, UploadCloud, X } from 'lucide-react';
+import { Edit, Loader2, PackageOpen, DollarSign, Percent, AlertCircle, UploadCloud, X, Video } from 'lucide-react';
 import NextImage from 'next/image';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -27,7 +27,7 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  imageUrls: z.string().optional(), // Will store comma-separated Data URIs or be empty
+  mediaUrls: z.string().optional(), // Stores comma-separated Data URIs or existing URLs
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
@@ -42,10 +42,11 @@ export default function EditProductPage() {
   const [product, setProduct] = useState<Product | null | undefined>(undefined); 
   const [isLoadingProduct, setIsLoadingProduct] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-  const [imageFiles, setImageFiles] = useState<File[]>([]); // For newly uploaded files
+  
+  const [mediaPreviews, setMediaPreviews] = useState<string[]>([]); // Shows existing URLs or new Data URIs
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]); // For newly uploaded files
 
-  const form = useForm<ProductFormData>({
+  const form = useForm<ProductFormData>({ // Reusing ProductFormData, which includes mediaUrls as string
     resolver: zodResolver(productSchema),
     defaultValues: {
       name: '',
@@ -55,21 +56,21 @@ export default function EditProductPage() {
       stockLevel: 0,
       reorderPoint: 0,
       category: '',
-      imageUrls: '',
+      mediaUrls: '',
     },
   });
 
   const populateForm = (productData: Product) => {
     form.reset({
       ...productData,
-      imageUrls: productData.imageUrls?.join(', ') || '', // Keep this for initial load if needed
+      mediaUrls: productData.mediaUrls?.join(',') || '', // For form field, existing URLs as string
     });
-    if (productData.imageUrls && productData.imageUrls.length > 0) {
-      setImagePreviews(productData.imageUrls.filter(url => url.startsWith('data:image') || url.startsWith('https://placehold.co')));
+    if (productData.mediaUrls && productData.mediaUrls.length > 0) {
+      setMediaPreviews(productData.mediaUrls.filter(url => url.startsWith('data:') || url.startsWith('http')));
     } else {
-      setImagePreviews([]);
+      setMediaPreviews([]);
     }
-    setImageFiles([]); // Reset any staged files
+    setStagedFiles([]); // Reset any staged files from previous interactions
   };
   
   useEffect(() => {
@@ -100,49 +101,74 @@ export default function EditProductPage() {
           .finally(() => setIsLoadingProduct(false));
       }
     }
-  }, [productId, fetchProductByIdFromServer, getProductById]); // form removed from deps to avoid re-populating on every change
+  }, [productId, fetchProductByIdFromServer, getProductById]);
 
-  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files) {
-      const newPreviews: string[] = [];
-      const newImageFiles: File[] = Array.from(files);
-      
-      setImageFiles(newImageFiles); // New files replace old staged files
+      const newStagedFiles = Array.from(files);
+      setStagedFiles(newStagedFiles); // New files replace old staged files
 
-      newImageFiles.forEach(file => {
+      const newPreviews: string[] = [];
+      if (newStagedFiles.length === 0) {
+        // If user deselects all files, revert to original product media if available
+        setMediaPreviews(product?.mediaUrls || []);
+        return;
+      }
+      
+      newStagedFiles.forEach(file => {
         const reader = new FileReader();
         reader.onloadend = () => {
           newPreviews.push(reader.result as string);
-          if (newPreviews.length === newImageFiles.length) {
-            setImagePreviews([...newPreviews]); // Previews are for newly uploaded files
+          if (newPreviews.length === newStagedFiles.length) {
+            setMediaPreviews(newPreviews); // Previews are now for newly uploaded files
           }
         };
         reader.readAsDataURL(file);
       });
-       if (newImageFiles.length === 0) {
-        // If user deselects all files, decide if you want to revert to original product images or clear all
-        // For now, let's clear previews if no new files are selected. User can choose not to save.
-        setImagePreviews([]);
-      }
     }
   };
 
-  const removeImagePreview = (index: number) => {
-    const newImagePreviews = [...imagePreviews];
-    newImagePreviews.splice(index, 1);
-    setImagePreviews(newImagePreviews);
+  const removeMediaPreview = (index: number) => {
+    const newMediaPreviews = [...mediaPreviews];
+    newMediaPreviews.splice(index, 1);
+    setMediaPreviews(newMediaPreviews);
     
-    // If this preview was from a newly uploaded file, remove the file too
-    if (imageFiles.length > index && imagePreviews[index]?.startsWith('data:image')) {
-       const newImageFiles = [...imageFiles];
-       // This logic is a bit tricky, mapping previews to files. 
-       // Simpler: new uploads always replace. If a preview is removed, the corresponding file will not be submitted.
-       // The current `imageFiles` state will be used on submit.
-       // For this simple `removeImagePreview`, we'll assume it removes from the preview array.
-       // The actual `imageFiles` state will be what's converted on submit.
-       // To be very precise, one would map previews to File objects.
-       // For now, removing preview. On submit, only current imageFiles are used.
+    // Check if the removed preview corresponds to a staged file
+    // This part is a bit tricky if mediaPreviews contains mixed (original URLs + new Data URIs)
+    // A simpler approach: if a preview is removed, we must ensure it's not from stagedFiles
+    // or ensure stagedFiles is also updated.
+    // If the removed preview was a Data URI and was part of the *current* upload batch (stagedFiles), remove from stagedFiles.
+    const removedSrc = mediaPreviews[index];
+    const stagedFileIndex = stagedFiles.findIndex(file => {
+        // This check is imperfect as multiple files could have same name/size, but good enough for UI
+        // A more robust way would be to create {file: File, preview: string} objects in stagedFiles
+        // For now, if it's a data URI, we assume it might be from the staged files.
+        return removedSrc.startsWith('data:'); // simplistic check
+    });
+
+    if (removedSrc.startsWith('data:') && stagedFileIndex > -1 && index < stagedFiles.length) { // ensure index is valid for stagedFiles
+      const newStagedFiles = [...stagedFiles];
+      // This assumes the order of mediaPreviews (when showing staged files) matches stagedFiles.
+      // This holds if handleFileChange sets mediaPreviews directly from stagedFiles.
+      // If mediaPreviews was showing a mix (initial + new), this needs care.
+      // Let's assume for now, if a data URI is removed, we try to remove a corresponding staged file.
+      // A better way: when a preview is removed, if it's one of the *newly uploaded Data URIs*, remove the corresponding File object from `stagedFiles`.
+      // The current `stagedFiles` reflects the *new* files selected for upload.
+      // If `mediaPreviews[index]` was derived from `stagedFiles[index]`, then:
+      if (stagedFiles.length === mediaPreviews.length && mediaPreviews.every(p => p.startsWith('data:'))) {
+         // This implies all previews are from current staged files.
+         newStagedFiles.splice(index, 1);
+         setStagedFiles(newStagedFiles);
+      } else {
+        // If previews are mixed (original + new), or only original, just remove from preview.
+        // The submit logic will handle using the remaining previews or staged files.
+      }
+    }
+     // If all files are removed, clear the file input value
+    const fileInput = document.getElementById('media-upload-edit') as HTMLInputElement;
+    if (fileInput && newMediaPreviews.length === 0 && stagedFiles.length === 0) {
+        fileInput.value = ""; 
     }
   };
 
@@ -150,12 +176,11 @@ export default function EditProductPage() {
   async function onSubmit(values: ProductFormData) {
     if (!productId || !product) return;
     try {
-      let finalImageUrls = product.imageUrls || []; // Start with existing image URLs
+      let finalMediaUrlsString: string;
 
-      // If new files were uploaded, they replace existing images
-      if (imageFiles.length > 0) {
-        finalImageUrls = await Promise.all(
-          imageFiles.map(file => {
+      if (stagedFiles.length > 0) { // New files were uploaded
+        const dataUris = await Promise.all(
+          stagedFiles.map(file => {
             return new Promise<string>((resolve, reject) => {
               const reader = new FileReader();
               reader.onloadend = () => resolve(reader.result as string);
@@ -164,21 +189,16 @@ export default function EditProductPage() {
             });
           })
         );
-      } else if (imagePreviews.length > 0 && imagePreviews.every(p => p.startsWith('data:image') || p.startsWith('https://placehold.co'))) {
-        // If no new files, but previews exist (from initial load or kept), use them
-        // This assumes previews are the source of truth if no new files.
-        // This might need refinement if users can delete existing previews without uploading new ones.
-        // A safer approach: if imageFiles is empty, and imagePreviews is empty, then imageUrls = ""
-        // if imageFiles is empty, but imagePreviews has original images, keep them.
-        // The current `imagePreviews` state reflects what user sees. If they removed all, it's empty.
-        finalImageUrls = imagePreviews.filter(p => p.startsWith('data:image')); // Only keep DataURIs, placeholders are handled by backend if empty
-      } else {
-         finalImageUrls = []; // Cleared all images
+        finalMediaUrlsString = dataUris.join(',');
+      } else { // No new files uploaded, use the current state of mediaPreviews
+        // Filter out any placeholders if they were not meant to be saved.
+        // For edit, if mediaPreviews is empty, it means user cleared them.
+        finalMediaUrlsString = mediaPreviews.filter(p => p.startsWith('data:') || p.startsWith('http')).join(',');
       }
       
       const submissionValues = {
-        ...values,
-        imageUrls: finalImageUrls.join(','),
+        ...values, // Form values (name, desc, price etc.)
+        mediaUrls: finalMediaUrlsString, // String of Data URIs or existing URLs
       };
 
       await updateProduct(productId, submissionValues);
@@ -223,7 +243,7 @@ export default function EditProductPage() {
               <Skeleton className="h-10 w-full" />
             </div>
             <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" /> {/* For media */}
             <Skeleton className="h-10 w-24" />
           </CardContent>
         </Card>
@@ -385,50 +405,58 @@ export default function EditProductPage() {
               />
               <FormField
                 control={form.control}
-                name="imageUrls"
-                render={({ field }) => ( // field is not directly used for file input value
+                name="mediaUrls"
+                render={({ field }) => ( 
                   <FormItem>
-                    <FormLabel>Product Images (Optional)</FormLabel>
+                    <FormLabel>Product Media (Images/Videos)</FormLabel>
                     <FormControl>
                        <div className="flex items-center gap-2">
                         <UploadCloud className="h-5 w-5 text-muted-foreground" />
                         <Input 
+                          id="media-upload-edit"
                           type="file" 
                           multiple 
-                          accept="image/*"
-                          onChange={handleImageChange}
+                          accept="image/*,video/*"
+                          onChange={handleFileChange}
                           className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
                         />
                       </div>
                     </FormControl>
                     <FormDescription>
-                      Upload new images to replace existing ones. If no new images are uploaded, current images will be kept unless cleared.
+                      Upload new images/videos to replace existing ones. If no new files are uploaded, current media will be kept unless cleared below.
                     </FormDescription>
                     <FormMessage />
-                    {imagePreviews.length > 0 && (
-                      <div className="mt-4 grid grid-cols-3 gap-4">
-                        {imagePreviews.map((src, index) => (
-                          <div key={index} className="relative group">
-                            <NextImage 
-                              src={src} 
-                              alt={`Preview ${index + 1}`} 
-                              width={100} 
-                              height={100} 
-                              className="rounded-md object-cover aspect-square border" 
-                              data-ai-hint="product item"
-                              onError={(e) => { e.currentTarget.src = 'https://placehold.co/100x100.png?text=Error'; }}
-                            />
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="icon"
-                              className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => removeImagePreview(index)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))}
+                    {mediaPreviews.length > 0 && (
+                      <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        {mediaPreviews.map((src, index) => {
+                          const isVideo = src.startsWith('data:video') || (src.startsWith('http') && (src.includes('.mp4') || src.includes('.webm') || src.includes('.ogv'))); // Basic check for video
+                          return (
+                            <div key={index} className="relative group aspect-square">
+                              {isVideo ? (
+                                <video src={src} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
+                              ) : (
+                                <NextImage 
+                                  src={src} 
+                                  alt={`Preview ${index + 1}`} 
+                                  layout="fill" 
+                                  objectFit="cover" 
+                                  className="rounded-md border" 
+                                  data-ai-hint="product item"
+                                  onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}
+                                />
+                              )}
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="icon"
+                                className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                onClick={() => removeMediaPreview(index)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </FormItem>

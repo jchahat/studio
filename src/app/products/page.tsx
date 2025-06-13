@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
-import Image from 'next/image';
+import NextImage from 'next/image'; // Renamed to NextImage
 import Link from 'next/link';
 import { useProducts } from '@/contexts/ProductContext';
 import type { Product } from '@/types';
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowUpDown, Search, PackagePlus, Edit, Trash2, Package, Loader2, AlertCircle, DollarSign } from 'lucide-react';
+import { ArrowUpDown, Search, PackagePlus, Edit, Trash2, Package, Loader2, AlertCircle, Video } from 'lucide-react'; // Added Video icon
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,9 +67,10 @@ export default function ProductListPage() {
         if (typeof valA === 'number' && typeof valB === 'number') {
            return sortConfig.direction === 'ascending' ? valA - valB : valB - valA;
         }
-        if (valA < valB) return sortConfig.direction === 'ascending' ? -1 : 1;
-        if (valA > valB) return sortConfig.direction === 'ascending' ? 1 : -1;
-        return 0;
+        // Fallback for other types or mixed types - this might need refinement based on actual data
+        const strA = String(valA);
+        const strB = String(valB);
+        return sortConfig.direction === 'ascending' ? strA.localeCompare(strB) : strB.localeCompare(strA);
       });
     }
     return sortableProducts.filter(product =>
@@ -173,7 +174,7 @@ export default function ProductListPage() {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead className="w-[80px] hidden sm:table-cell"></TableHead>
+                            <TableHead className="w-[80px] hidden sm:table-cell">Media</TableHead>
                             <TableHead>Name</TableHead>
                             <TableHead className="hidden md:table-cell">Description</TableHead>
                             <TableHead className="hidden lg:table-cell">Category</TableHead>
@@ -209,7 +210,7 @@ export default function ProductListPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[80px] hidden sm:table-cell"></TableHead>
+                  <TableHead className="w-[80px] hidden sm:table-cell">Media</TableHead>
                   <TableHead onClick={() => requestSort('name')} className="cursor-pointer hover:bg-muted">
                     Name <ArrowUpDown className="ml-2 h-4 w-4 inline" />
                   </TableHead>
@@ -232,21 +233,29 @@ export default function ProductListPage() {
               <TableBody>
                 {sortedProducts.map((product) => {
                   const discountedPrice = calculateDiscountedPrice(product);
-                  const displayImageUrl = (product.imageUrls && product.imageUrls.length > 0)
-                    ? product.imageUrls[0]
+                  const firstMediaUrl = (product.mediaUrls && product.mediaUrls.length > 0)
+                    ? product.mediaUrls[0]
                     : `https://placehold.co/64x64.png?text=${product.name.charAt(0)}`;
+                  const isVideo = firstMediaUrl.startsWith('data:video');
+
                   return (
                   <TableRow key={product.id} className={product.stockLevel <= product.reorderPoint ? 'bg-destructive/10 hover:bg-destructive/20' : 'hover:bg-muted/50'}>
                     <TableCell className="hidden sm:table-cell">
-                      <Image
-                        src={displayImageUrl}
-                        alt={product.name}
-                        width={64}
-                        height={64}
-                        className="rounded-md object-cover aspect-square"
-                        data-ai-hint="product item"
-                        onError={(e) => { e.currentTarget.src = `https://placehold.co/64x64.png?text=${product.name.charAt(0)}`;}}
-                      />
+                      {isVideo ? (
+                         <div className="w-16 h-16 flex items-center justify-center bg-muted rounded-md border" data-ai-hint="video placeholder">
+                           <Video className="h-8 w-8 text-muted-foreground" />
+                         </div>
+                       ) : (
+                         <NextImage
+                           src={firstMediaUrl}
+                           alt={product.name}
+                           width={64}
+                           height={64}
+                           className="rounded-md object-cover aspect-square"
+                           data-ai-hint="product item"
+                           onError={(e) => { (e.target as HTMLImageElement).src = `https://placehold.co/64x64.png?text=${product.name.charAt(0)}`;}}
+                         />
+                       )}
                     </TableCell>
                     <TableCell className="font-medium">{product.name}</TableCell>
                     <TableCell className="hidden md:table-cell max-w-xs truncate">{product.description}</TableCell>

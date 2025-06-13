@@ -8,20 +8,18 @@ export interface Product {
   stockLevel: number;
   reorderPoint: number;
   category: string;
-  imageUrls?: string[]; // Changed from imageUrl: string to imageUrls: string[]
+  mediaUrls?: string[]; // Changed from imageUrls to mediaUrls, can store image/video Data URIs or external URLs
 }
 
 // ProductFormData will include price and discountPercentage
 // Omitting 'id' as it's generated or already exists for updates
-// For imageUrls, the form will accept a string, to be parsed in actions.
-export type ProductFormData = Omit<Product, 'id' | 'imageUrls'> & {
-  imageUrls?: string; // Form will take a comma-separated string
+// For mediaUrls, the form will accept a string, to be parsed in actions (if manual input) or handled by file uploads.
+export type ProductFormData = Omit<Product, 'id' | 'mediaUrls'> & {
+  mediaUrls?: string; // Form will primarily use file uploads, this can be a fallback or for initial data
 };
 
 
 // Specific type for product updates, where all fields might be optional
-// For this implementation, we'll reuse ProductFormData for simplicity in the form
-// but the backend update action can be more flexible.
-export type ProductUpdateData = Partial<Omit<Product, 'id' | 'imageUrls'>> & {
-  imageUrls?: string; // Form will take a comma-separated string
+export type ProductUpdateData = Partial<Omit<Product, 'id' | 'mediaUrls'>> & {
+  mediaUrls?: string; // Form will primarily use file uploads for changes
 };
