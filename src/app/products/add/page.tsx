@@ -17,11 +17,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useRouter } from 'next/navigation';
 import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X, Video, Image as ImageIcon } from 'lucide-react';
 import NextImage from 'next/image';
-import { storage } from '@/lib/firebase'; // Import Firebase storage instance
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { v4 as uuidv4 } from 'uuid'; // For generating unique file names
 import { Progress } from "@/components/ui/progress";
-
+import { getB2UploadCredentialsAction, type B2UploadCredentials } from '@/actions/b2Actions';
+import axios from 'axios';
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -31,22 +29,30 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  mediaUrls: z.array(z.string().url({message: "Each media URL must be a valid URL."})).optional().default([]),
+  mediaUrls: z.array(z.string()).optional().default([]), // Will store B2 public URLs
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
+
+type StagedFile = {
+  file: File;
+  id: string; // For tracking progress
+  previewUrl: string;
+  type: 'image' | 'video';
+  progress: number;
+  b2Url?: string; // Store the final B2 URL here
+  error?: string;
+};
 
 export default function AddProductPage() {
   const { addProduct } = useProducts();
   const { toast } = useToast();
   const router = useRouter();
   
-  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
-  const [mediaPreviews, setMediaPreviews] = useState<{url: string, type: 'image' | 'video'}[]>([]);
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
-  const [isUploading, setIsUploading] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [isUploadingGlobal, setIsUploadingGlobal] = useState(false); // For overall form submission state
 
-  const form = useForm<z.infer<typeof productSchema>>({ // Use inferred type from schema
+  const form = useForm<z.infer<typeof productSchema>>({ 
     resolver: zodResolver(productSchema),
     defaultValues: {
       name: '',
@@ -63,60 +69,67 @@ export default function AddProductPage() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files) {
-      const newStagedFiles = Array.from(files);
-      setStagedFiles(prev => [...prev, ...newStagedFiles]);
-
-      const newPreviews = newStagedFiles.map(file => ({
-        url: URL.createObjectURL(file),
-        type: file.type.startsWith('video/') ? 'video' : 'image' as 'image' | 'video'
+      const newStagedFiles: StagedFile[] = Array.from(files).map(file => ({
+        file,
+        id: crypto.randomUUID(),
+        previewUrl: URL.createObjectURL(file),
+        type: file.type.startsWith('video/') ? 'video' : 'image',
+        progress: 0,
       }));
-      setMediaPreviews(prev => [...prev, ...newPreviews]);
+      setStagedFiles(prev => [...prev, ...newStagedFiles]);
     }
   };
 
-  const removeMedia = (index: number) => {
-    setStagedFiles(prev => prev.filter((_, i) => i !== index));
-    setMediaPreviews(prev => prev.filter((_, i) => i !== index));
+  const removeMedia = (id: string) => {
+    setStagedFiles(prev => prev.filter(sf => sf.id !== id));
     // If all files are removed, clear the file input value
     const fileInput = document.getElementById('media-upload') as HTMLInputElement;
-    if (fileInput && stagedFiles.length -1 === 0 ) {
+    if (fileInput && stagedFiles.filter(sf => sf.id !== id).length === 0 ) {
         fileInput.value = ""; 
     }
   };
 
+  const uploadFileToB2 = async (stagedFile: StagedFile): Promise<string> => {
+    try {
+      const b2Creds = await getB2UploadCredentialsAction(stagedFile.file.name);
+      
+      const response = await axios.post(b2Creds.uploadUrl, stagedFile.file, {
+        headers: {
+          'Authorization': b2Creds.authToken,
+          'X-Bz-File-Name': b2Creds.finalFileName,
+          'Content-Type': stagedFile.file.type,
+          'X-Bz-Content-Sha1': 'do_not_verify', // For simplicity in this example
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setStagedFiles(prev => prev.map(sf => sf.id === stagedFile.id ? {...sf, progress: percentCompleted} : sf));
+          }
+        },
+      });
+      // Construct public URL
+      const publicUrl = `${b2Creds.publicFileUrlBase}/${b2Creds.finalFileName}`;
+      setStagedFiles(prev => prev.map(sf => sf.id === stagedFile.id ? {...sf, b2Url: publicUrl, progress: 100} : sf));
+      return publicUrl;
+    } catch (error: any) {
+        console.error("B2 Upload failed for file:", stagedFile.file.name, error);
+        setStagedFiles(prev => prev.map(sf => sf.id === stagedFile.id ? {...sf, error: `Upload failed: ${error.message || 'Unknown error'}`} : sf));
+        throw new Error(`Failed to upload ${stagedFile.file.name} to B2.`);
+    }
+  };
+
+
   async function onSubmit(values: z.infer<typeof productSchema>) {
-    setIsUploading(true);
-    setUploadProgress({});
+    setIsUploadingGlobal(true);
     let uploadedUrls: string[] = [];
 
     try {
       if (stagedFiles.length > 0) {
-        const uploadPromises = stagedFiles.map(file => {
-          const fileId = uuidv4();
-          const storageRef = ref(storage, `products/${fileId}-${file.name}`);
-          const uploadTask = uploadBytesResumable(storageRef, file);
-
-          return new Promise<string>((resolve, reject) => {
-            uploadTask.on('state_changed',
-              (snapshot) => {
-                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                setUploadProgress(prev => ({ ...prev, [file.name]: progress }));
-              },
-              (error) => {
-                console.error("Upload failed for file:", file.name, error);
-                reject(error);
-              },
-              async () => {
-                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                resolve(downloadURL);
-              }
-            );
-          });
-        });
+        const uploadPromises = stagedFiles.map(sf => uploadFileToB2(sf));
         uploadedUrls = await Promise.all(uploadPromises);
       }
       
-      const submissionValues: ProductFormData = { // Ensure this matches ProductFormData
+      const submissionValues: ProductFormData = { 
         ...values,
         mediaUrls: uploadedUrls,
       };
@@ -128,7 +141,6 @@ export default function AddProductPage() {
       });
       form.reset();
       setStagedFiles([]);
-      setMediaPreviews([]);
       const fileInput = document.getElementById('media-upload') as HTMLInputElement;
       if (fileInput) fileInput.value = "";
       router.push('/products');
@@ -140,8 +152,7 @@ export default function AddProductPage() {
         variant: "destructive",
       });
     } finally {
-      setIsUploading(false);
-      setUploadProgress({});
+      setIsUploadingGlobal(false);
     }
   }
 
@@ -286,42 +297,51 @@ export default function AddProductPage() {
                       accept="image/*,video/*"
                       onChange={handleFileChange}
                       className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-                      disabled={isUploading}
+                      disabled={isUploadingGlobal}
                     />
                   </div>
                 </FormControl>
                 <FormDescription>
-                  Upload one or more images or videos for the product.
+                  Upload one or more images or videos for the product. These will be uploaded to Backblaze B2.
                 </FormDescription>
                 <FormMessage />
                 {stagedFiles.length > 0 && (
-                  <div className="mt-4 space-y-2">
-                    {stagedFiles.map((file, index) => (
-                      <div key={index} className="text-xs text-muted-foreground">
-                        <span>{file.name} ({(file.size / 1024).toFixed(2)} KB)</span>
-                        {uploadProgress[file.name] !== undefined && (
-                          <Progress value={uploadProgress[file.name]} className="h-2 mt-1" />
+                  <div className="mt-4 space-y-3">
+                    {stagedFiles.map((sf) => (
+                      <div key={sf.id} className="text-xs text-muted-foreground border p-2 rounded-md">
+                        <div className="flex justify-between items-center">
+                            <span>{sf.file.name} ({(sf.file.size / 1024).toFixed(2)} KB)</span>
+                            {!isUploadingGlobal && !sf.b2Url && (
+                                <Button type="button" variant="ghost" size="icon" onClick={() => removeMedia(sf.id)} className="h-6 w-6 text-destructive">
+                                    <X className="h-4 w-4" />
+                                </Button>
+                            )}
+                        </div>
+                        {sf.progress > 0 && sf.progress < 100 && (
+                          <Progress value={sf.progress} className="h-2 mt-1" />
                         )}
+                        {sf.b2Url && <p className="text-green-600 text-xs mt-1">Uploaded!</p>}
+                        {sf.error && <p className="text-red-600 text-xs mt-1">{sf.error}</p>}
                       </div>
                     ))}
                   </div>
                 )}
-                {mediaPreviews.length > 0 && (
+                {stagedFiles.filter(sf => sf.previewUrl).length > 0 && (
                   <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    {mediaPreviews.map((preview, index) => (
-                      <div key={index} className="relative group aspect-square">
-                        {preview.type === 'video' ? (
-                          <video src={preview.url} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
+                    {stagedFiles.map((sf) => (
+                      <div key={sf.id} className="relative group aspect-square">
+                        {sf.type === 'video' ? (
+                          <video src={sf.previewUrl} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
                         ) : (
-                          <NextImage src={preview.url} alt={`Preview ${index + 1}`} layout="fill" objectFit="cover" className="rounded-md border" data-ai-hint="product item" onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}/>
+                          <NextImage src={sf.previewUrl} alt={`Preview ${sf.file.name}`} layout="fill" objectFit="cover" className="rounded-md border" data-ai-hint="product item" unoptimized={true} onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}/>
                         )}
-                        {!isUploading && (
+                        {!isUploadingGlobal && !sf.b2Url && (
                           <Button
                             type="button"
                             variant="destructive"
                             size="icon"
-                            className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                            onClick={() => removeMedia(index)}
+                            className="absolute top-1 right-1 h-6 w-6 opacity-70 group-hover:opacity-100 transition-opacity z-10"
+                            onClick={() => removeMedia(sf.id)}
                           >
                             <X className="h-4 w-4" />
                           </Button>
@@ -331,8 +351,8 @@ export default function AddProductPage() {
                   </div>
                 )}
               </FormItem>
-              <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || isUploading}>
-                {isUploading ? (
+              <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || isUploadingGlobal}>
+                {isUploadingGlobal ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Uploading & Adding...
@@ -351,4 +371,3 @@ export default function AddProductPage() {
     </div>
   );
 }
-

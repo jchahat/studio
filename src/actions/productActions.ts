@@ -26,7 +26,7 @@ function mongoDocToProduct(doc: any): Product {
     category: doc.category,
     mediaUrls: Array.isArray(doc.mediaUrls) && doc.mediaUrls.length > 0 
                  ? doc.mediaUrls.map(String) // Ensure all elements are strings
-                 : [`https://placehold.co/300x200.png?text=${encodeURIComponent(doc.name) || 'Product'}`],
+                 : [`https://placehold.co/300x200.png`], // Use a generic placeholder
   };
 }
 
@@ -54,12 +54,11 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
       stockLevel: Number(productData.stockLevel),
       reorderPoint: Number(productData.reorderPoint),
       category: productData.category,
-      mediaUrls: productData.mediaUrls && productData.mediaUrls.length > 0 ? productData.mediaUrls : [], // Store empty array if no URLs
+      mediaUrls: productData.mediaUrls || [], // Expecting an array of B2 URLs
     };
 
     const result = await productsCollection.insertOne(productDocument as Omit<Product, 'id'>);
     
-    // Construct the Product object using the inserted document and mongoDocToProduct for consistency
     const insertedDoc = { _id: result.insertedId, ...productDocument };
     return mongoDocToProduct(insertedDoc);
 
@@ -86,9 +85,9 @@ export async function updateProductAction(productId: string, productData: Produc
     if (productData.reorderPoint !== undefined) updateDocument.reorderPoint = Number(productData.reorderPoint);
     if (productData.category !== undefined) updateDocument.category = productData.category;
     
-    // Handle mediaUrls for updates - expect an array of URLs
+    // Handle mediaUrls for updates - expect an array of B2 URLs
     if (productData.mediaUrls !== undefined) {
-      updateDocument.mediaUrls = productData.mediaUrls; // Assign the array directly
+      updateDocument.mediaUrls = productData.mediaUrls; 
     }
     
     if (Object.keys(updateDocument).length === 0) {
@@ -127,6 +126,8 @@ export async function updateProductStockAction(productId: string, newStockLevel:
 }
 
 export async function deleteProductAction(productId: string): Promise<void> {
+  // Note: This does not delete files from Backblaze B2.
+  // That would require additional logic and B2 API calls.
   try {
     const productsCollection = await getProductsStore();
     await productsCollection.deleteOne({ _id: new ObjectId(productId) });

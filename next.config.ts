@@ -17,6 +17,18 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
+      { // For Backblaze B2 public URLs (e.g., f000.backblazeb2.com, f001.backblazeb2.com, etc.)
+        protocol: 'https',
+        hostname: '*.backblazeb2.com',
+        port: '',
+        pathname: '/**',
+      },
+      { // For Backblaze B2 S3-compatible URLs (e.g., your-bucket-name.s3.us-west-000.backblazeb2.com)
+        protocol: 'https',
+        hostname: `*.s3.${process.env.BACKBLAZE_B2_S3_REGION || 'us-west-000'}.backblazeb2.com`, // Example, adjust region if needed
+        port: '',
+        pathname: '/**',
+      }
     ],
   },
   webpack: (config, { isServer }) => {
