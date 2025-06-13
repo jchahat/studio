@@ -111,14 +111,16 @@ export default function ProductListPage() {
   const renderLoadingSkeletons = () => (
     Array.from({ length: 5 }).map((_, index) => (
       <TableRow key={`skeleton-${index}`}>
-        <TableCell className="hidden sm:table-cell"><Skeleton className="h-[64px] w-[64px] rounded-md" /></TableCell>
-        <TableCell><Skeleton className="h-4 w-3/4" /></TableCell>
-        <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-full" /></TableCell>
-        <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-1/2" /></TableCell>
-        <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell> {/* Price */}
-        <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell> {/* Stock */}
-        <TableCell className="text-right hidden sm:table-cell"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell> {/* Reorder */}
-        <TableCell className="text-right"><div className="flex gap-1 justify-end"><Skeleton className="h-8 w-8 rounded" /><Skeleton className="h-8 w-8 rounded" /></div></TableCell>
+        <>
+          <TableCell className="hidden sm:table-cell"><Skeleton className="h-[64px] w-[64px] rounded-md" /></TableCell>
+          <TableCell><Skeleton className="h-4 w-3/4" /></TableCell>
+          <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-full" /></TableCell>
+          <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-1/2" /></TableCell>
+          <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell>
+          <TableCell className="text-right"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell>
+          <TableCell className="text-right hidden sm:table-cell"><Skeleton className="h-4 w-1/4 ml-auto" /></TableCell>
+          <TableCell className="text-right"><div className="flex gap-1 justify-end"><Skeleton className="h-8 w-8 rounded" /><Skeleton className="h-8 w-8 rounded" /></div></TableCell>
+        </>
       </TableRow>
     ))
   );
@@ -309,3 +311,4 @@ export default function ProductListPage() {
     </div>
   );
 }
+
