@@ -25,24 +25,9 @@ function mongoDocToProduct(doc: any): Product {
     reorderPoint: Number(doc.reorderPoint),
     category: doc.category,
     mediaUrls: Array.isArray(doc.mediaUrls) && doc.mediaUrls.length > 0 
-                 ? doc.mediaUrls 
+                 ? doc.mediaUrls.map(String) // Ensure all elements are strings
                  : [`https://placehold.co/300x200.png?text=${encodeURIComponent(doc.name) || 'Product'}`],
   };
-}
-
-function parseMediaUrls(urlsString?: string, productName?: string): string[] {
-  if (urlsString && urlsString.trim() !== '') {
-    const urls = urlsString.split(',').map(url => url.trim()).filter(url => url !== '');
-    if (urls.length > 0) return urls;
-  }
-  // If urlsString is empty or only contains placeholders from a previous save, 
-  // and we are not explicitly clearing them, we might want to preserve them.
-  // However, if it's truly empty, generate a placeholder.
-  // For file uploads, this string will be a comma-separated list of Data URIs.
-  if (!productName && (!urlsString || urlsString.trim() === '')) {
-      return [`https://placehold.co/300x200.png?text=Product`];
-  }
-  return [`https://placehold.co/300x200.png?text=${encodeURIComponent(productName || 'Product')}`];
 }
 
 
@@ -60,11 +45,7 @@ export async function fetchProductsAction(): Promise<Product[]> {
 export async function addProductAction(productData: ProductFormData): Promise<Product> {
   try {
     const productsCollection = await getProductsStore();
-    // mediaUrls from ProductFormData is expected to be a comma-separated string of Data URIs from file uploads
-    const parsedMediaUrls = productData.mediaUrls && productData.mediaUrls.trim() !== ''
-      ? productData.mediaUrls.split(',').map(url => url.trim()).filter(url => url !== '')
-      : parseMediaUrls(undefined, productData.name); // Fallback to placeholder if no media uploaded
-
+    
     const productDocument = {
       name: productData.name,
       description: productData.description,
@@ -73,23 +54,15 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
       stockLevel: Number(productData.stockLevel),
       reorderPoint: Number(productData.reorderPoint),
       category: productData.category,
-      mediaUrls: parsedMediaUrls.length > 0 ? parsedMediaUrls : [`https://placehold.co/300x200.png?text=${encodeURIComponent(productData.name || 'Product')}`],
+      mediaUrls: productData.mediaUrls && productData.mediaUrls.length > 0 ? productData.mediaUrls : [], // Store empty array if no URLs
     };
 
     const result = await productsCollection.insertOne(productDocument as Omit<Product, 'id'>);
     
-    const newProduct: Product = {
-      id: result.insertedId.toString(),
-      name: productDocument.name,
-      description: productDocument.description,
-      price: productDocument.price,
-      discountPercentage: productDocument.discountPercentage,
-      stockLevel: productDocument.stockLevel,
-      reorderPoint: productDocument.reorderPoint,
-      category: productDocument.category,
-      mediaUrls: productDocument.mediaUrls,
-    };
-    return newProduct;
+    // Construct the Product object using the inserted document and mongoDocToProduct for consistency
+    const insertedDoc = { _id: result.insertedId, ...productDocument };
+    return mongoDocToProduct(insertedDoc);
+
   } catch (e: any) {
     console.error("Failed to add product to DB:", e);
     throw new Error(`Failed to add product to database. Original error: ${e.message || String(e)}`);
@@ -113,29 +86,12 @@ export async function updateProductAction(productId: string, productData: Produc
     if (productData.reorderPoint !== undefined) updateDocument.reorderPoint = Number(productData.reorderPoint);
     if (productData.category !== undefined) updateDocument.category = productData.category;
     
-    // Handle mediaUrls for updates
+    // Handle mediaUrls for updates - expect an array of URLs
     if (productData.mediaUrls !== undefined) {
-      if (productData.mediaUrls.trim() === '') { // Explicitly clearing media
-        updateDocument.mediaUrls = parseMediaUrls(undefined, productData.name); // Set to default placeholder
-      } else {
-        const parsedUrls = productData.mediaUrls.split(',').map(url => url.trim()).filter(url => url !== '');
-        if (parsedUrls.length > 0) {
-          updateDocument.mediaUrls = parsedUrls;
-        } else {
-           // If string was not empty but resulted in no valid URLs (e.g. just commas), use placeholder
-           updateDocument.mediaUrls = parseMediaUrls(undefined, productData.name);
-        }
-      }
+      updateDocument.mediaUrls = productData.mediaUrls; // Assign the array directly
     }
     
     if (Object.keys(updateDocument).length === 0) {
-        // If no actual data fields are being updated, just media might have changed
-        // but media is handled above. If mediaUrls was undefined, it means no change to media.
-        // If it was defined (even if empty string for clearing), it's handled.
-        // So if updateDocument is empty, it means no actual product fields were changed.
-        // We might want to return early if only media was "changed" to the same value.
-        // However, the findOneAndUpdate will handle this fine.
-        // If truly nothing changed, we can fetch and return current.
         const currentProduct = await getProductByIdAction(productId);
         return currentProduct;
     }

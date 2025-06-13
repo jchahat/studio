@@ -1,12 +1,12 @@
 
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useProducts } from '@/contexts/ProductContext';
-import type { Product, ProductFormData } from '@/types'; // ProductFormData is fine for edit too
+import type { Product, ProductUpdateData } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,9 +15,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useParams } from 'next/navigation';
-import { Edit, Loader2, PackageOpen, DollarSign, Percent, AlertCircle, UploadCloud, X, Video } from 'lucide-react';
+import { Edit, Loader2, PackageOpen, DollarSign, Percent, AlertCircle, UploadCloud, X, Video, Image as ImageIcon } from 'lucide-react';
 import NextImage from 'next/image';
 import { Skeleton } from '@/components/ui/skeleton';
+import { storage } from '@/lib/firebase'; // Import Firebase storage instance
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { v4 as uuidv4 } from 'uuid'; // For generating unique file names
+import { Progress } from "@/components/ui/progress";
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -27,10 +31,12 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  mediaUrls: z.string().optional(), // Stores comma-separated Data URIs or existing URLs
+  mediaUrls: z.array(z.string().url({message: "Each media URL must be a valid URL."})).optional().default([]),
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
+
+type PreviewMedia = { url: string; type: 'image' | 'video'; isNew?: boolean; file?: File };
 
 export default function EditProductPage() {
   const { updateProduct, fetchProductByIdFromServer, getProductById } = useProducts();
@@ -43,10 +49,14 @@ export default function EditProductPage() {
   const [isLoadingProduct, setIsLoadingProduct] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   
-  const [mediaPreviews, setMediaPreviews] = useState<string[]>([]); // Shows existing URLs or new Data URIs
-  const [stagedFiles, setStagedFiles] = useState<File[]>([]); // For newly uploaded files
+  const [mediaPreviews, setMediaPreviews] = useState<PreviewMedia[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [isUploading, setIsUploading] = useState(false);
+  // Store URLs of files marked for deletion from Firebase Storage
+  const [urlsToDelete, setUrlsToDelete] = useState<string[]>([]);
 
-  const form = useForm<ProductFormData>({ // Reusing ProductFormData, which includes mediaUrls as string
+
+  const form = useForm<z.infer<typeof productSchema>>({
     resolver: zodResolver(productSchema),
     defaultValues: {
       name: '',
@@ -56,22 +66,26 @@ export default function EditProductPage() {
       stockLevel: 0,
       reorderPoint: 0,
       category: '',
-      mediaUrls: '',
+      mediaUrls: [],
     },
   });
-
-  const populateForm = (productData: Product) => {
+  
+  const populateForm = useCallback((productData: Product) => {
     form.reset({
       ...productData,
-      mediaUrls: productData.mediaUrls?.join(',') || '', // For form field, existing URLs as string
+      mediaUrls: productData.mediaUrls || [],
     });
     if (productData.mediaUrls && productData.mediaUrls.length > 0) {
-      setMediaPreviews(productData.mediaUrls.filter(url => url.startsWith('data:') || url.startsWith('http')));
+      setMediaPreviews(productData.mediaUrls.map(url => ({
+        url,
+        type: url.includes('.mp4') || url.includes('.webm') || url.includes('video') ? 'video' : 'image', // Basic type detection
+        isNew: false
+      })));
     } else {
       setMediaPreviews([]);
     }
-    setStagedFiles([]); // Reset any staged files from previous interactions
-  };
+    setUrlsToDelete([]);
+  }, [form]);
   
   useEffect(() => {
     if (productId) {
@@ -101,104 +115,91 @@ export default function EditProductPage() {
           .finally(() => setIsLoadingProduct(false));
       }
     }
-  }, [productId, fetchProductByIdFromServer, getProductById]);
+  }, [productId, fetchProductByIdFromServer, getProductById, populateForm]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files) {
-      const newStagedFiles = Array.from(files);
-      setStagedFiles(newStagedFiles); // New files replace old staged files
-
-      const newPreviews: string[] = [];
-      if (newStagedFiles.length === 0) {
-        // If user deselects all files, revert to original product media if available
-        setMediaPreviews(product?.mediaUrls || []);
-        return;
-      }
-      
-      newStagedFiles.forEach(file => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          newPreviews.push(reader.result as string);
-          if (newPreviews.length === newStagedFiles.length) {
-            setMediaPreviews(newPreviews); // Previews are now for newly uploaded files
-          }
-        };
-        reader.readAsDataURL(file);
-      });
+      const newFilesArray = Array.from(files);
+      const newPreviews = newFilesArray.map(file => ({
+        url: URL.createObjectURL(file),
+        type: file.type.startsWith('video/') ? 'video' : 'image' as 'image' | 'video',
+        isNew: true,
+        file: file
+      }));
+      setMediaPreviews(prev => [...prev, ...newPreviews]);
     }
   };
 
-  const removeMediaPreview = (index: number) => {
-    const newMediaPreviews = [...mediaPreviews];
-    newMediaPreviews.splice(index, 1);
-    setMediaPreviews(newMediaPreviews);
-    
-    // Check if the removed preview corresponds to a staged file
-    // This part is a bit tricky if mediaPreviews contains mixed (original URLs + new Data URIs)
-    // A simpler approach: if a preview is removed, we must ensure it's not from stagedFiles
-    // or ensure stagedFiles is also updated.
-    // If the removed preview was a Data URI and was part of the *current* upload batch (stagedFiles), remove from stagedFiles.
-    const removedSrc = mediaPreviews[index];
-    const stagedFileIndex = stagedFiles.findIndex(file => {
-        // This check is imperfect as multiple files could have same name/size, but good enough for UI
-        // A more robust way would be to create {file: File, preview: string} objects in stagedFiles
-        // For now, if it's a data URI, we assume it might be from the staged files.
-        return removedSrc.startsWith('data:'); // simplistic check
-    });
-
-    if (removedSrc.startsWith('data:') && stagedFileIndex > -1 && index < stagedFiles.length) { // ensure index is valid for stagedFiles
-      const newStagedFiles = [...stagedFiles];
-      // This assumes the order of mediaPreviews (when showing staged files) matches stagedFiles.
-      // This holds if handleFileChange sets mediaPreviews directly from stagedFiles.
-      // If mediaPreviews was showing a mix (initial + new), this needs care.
-      // Let's assume for now, if a data URI is removed, we try to remove a corresponding staged file.
-      // A better way: when a preview is removed, if it's one of the *newly uploaded Data URIs*, remove the corresponding File object from `stagedFiles`.
-      // The current `stagedFiles` reflects the *new* files selected for upload.
-      // If `mediaPreviews[index]` was derived from `stagedFiles[index]`, then:
-      if (stagedFiles.length === mediaPreviews.length && mediaPreviews.every(p => p.startsWith('data:'))) {
-         // This implies all previews are from current staged files.
-         newStagedFiles.splice(index, 1);
-         setStagedFiles(newStagedFiles);
-      } else {
-        // If previews are mixed (original + new), or only original, just remove from preview.
-        // The submit logic will handle using the remaining previews or staged files.
-      }
+  const removeMedia = (index: number) => {
+    const itemToRemove = mediaPreviews[index];
+    if (itemToRemove && !itemToRemove.isNew && itemToRemove.url.startsWith('https://firebasestorage.googleapis.com')) {
+      // If it's an existing Firebase URL, mark it for deletion
+      setUrlsToDelete(prev => [...prev, itemToRemove.url]);
     }
-     // If all files are removed, clear the file input value
+    setMediaPreviews(prev => prev.filter((_, i) => i !== index));
+    
     const fileInput = document.getElementById('media-upload-edit') as HTMLInputElement;
-    if (fileInput && newMediaPreviews.length === 0 && stagedFiles.length === 0) {
+    if (fileInput && mediaPreviews.length -1 === 0 ) {
         fileInput.value = ""; 
     }
   };
 
-
-  async function onSubmit(values: ProductFormData) {
-    if (!productId || !product) return;
+  const deleteFromFirebase = async (url: string) => {
     try {
-      let finalMediaUrlsString: string;
+      const storageRef = ref(storage, url);
+      await deleteObject(storageRef);
+      console.log("Successfully deleted from Firebase:", url);
+    } catch (error) {
+      // If deletion fails (e.g. file not found, permissions), log it but don't block submission
+      console.error("Failed to delete from Firebase, or file already deleted:", url, error);
+    }
+  };
 
-      if (stagedFiles.length > 0) { // New files were uploaded
-        const dataUris = await Promise.all(
-          stagedFiles.map(file => {
-            return new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(file);
-            });
-          })
-        );
-        finalMediaUrlsString = dataUris.join(',');
-      } else { // No new files uploaded, use the current state of mediaPreviews
-        // Filter out any placeholders if they were not meant to be saved.
-        // For edit, if mediaPreviews is empty, it means user cleared them.
-        finalMediaUrlsString = mediaPreviews.filter(p => p.startsWith('data:') || p.startsWith('http')).join(',');
+  async function onSubmit(values: z.infer<typeof productSchema>) {
+    if (!productId || !product) return;
+    setIsUploading(true);
+    setUploadProgress({});
+    
+    let finalMediaUrls: string[] = [];
+
+    try {
+      // Delete files marked for removal
+      if (urlsToDelete.length > 0) {
+        await Promise.all(urlsToDelete.map(url => deleteFromFirebase(url)));
+      }
+
+      const newFilesToUpload = mediaPreviews.filter(p => p.isNew && p.file).map(p => p.file!);
+      const existingUrls = mediaPreviews.filter(p => !p.isNew).map(p => p.url);
+      finalMediaUrls.push(...existingUrls); // Keep existing URLs not marked for deletion
+
+      if (newFilesToUpload.length > 0) {
+        const uploadPromises = newFilesToUpload.map(file => {
+          const fileId = uuidv4();
+          const storageRef = ref(storage, `products/${productId}/${fileId}-${file.name}`);
+          const uploadTask = uploadBytesResumable(storageRef, file);
+
+          return new Promise<string>((resolve, reject) => {
+            uploadTask.on('state_changed',
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                setUploadProgress(prev => ({ ...prev, [file.name]: progress }));
+              },
+              (error) => reject(error),
+              async () => {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(downloadURL);
+              }
+            );
+          });
+        });
+        const newlyUploadedUrls = await Promise.all(uploadPromises);
+        finalMediaUrls.push(...newlyUploadedUrls);
       }
       
-      const submissionValues = {
-        ...values, // Form values (name, desc, price etc.)
-        mediaUrls: finalMediaUrlsString, // String of Data URIs or existing URLs
+      const submissionValues: ProductUpdateData = {
+        ...values,
+        mediaUrls: finalMediaUrls,
       };
 
       await updateProduct(productId, submissionValues);
@@ -213,6 +214,9 @@ export default function EditProductPage() {
         description: error.message || "Could not update the product. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsUploading(false);
+      setUploadProgress({});
     }
   }
 
@@ -403,67 +407,84 @@ export default function EditProductPage() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="mediaUrls"
-                render={({ field }) => ( 
-                  <FormItem>
-                    <FormLabel>Product Media (Images/Videos)</FormLabel>
-                    <FormControl>
-                       <div className="flex items-center gap-2">
-                        <UploadCloud className="h-5 w-5 text-muted-foreground" />
-                        <Input 
-                          id="media-upload-edit"
-                          type="file" 
-                          multiple 
-                          accept="image/*,video/*"
-                          onChange={handleFileChange}
-                          className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-                        />
+              <FormItem>
+                <FormLabel>Product Media (Images/Videos)</FormLabel>
+                <FormControl>
+                   <div className="flex items-center gap-2">
+                    <UploadCloud className="h-5 w-5 text-muted-foreground" />
+                    <Input 
+                      id="media-upload-edit"
+                      type="file" 
+                      multiple 
+                      accept="image/*,video/*"
+                      onChange={handleFileChange}
+                      className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                      disabled={isUploading}
+                    />
+                  </div>
+                </FormControl>
+                <FormDescription>
+                  Upload new images/videos or manage existing ones. New uploads are added to the list.
+                </FormDescription>
+                <FormMessage />
+                 {/* Display upload progress for new files */}
+                {mediaPreviews.filter(p => p.isNew && p.file).length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    {mediaPreviews.filter(p => p.isNew && p.file).map((preview, index) => (
+                      <div key={`upload-${index}`} className="text-xs text-muted-foreground">
+                        {preview.file && (
+                          <>
+                          <span>{preview.file.name} ({(preview.file.size / 1024).toFixed(2)} KB)</span>
+                          {uploadProgress[preview.file.name] !== undefined && (
+                            <Progress value={uploadProgress[preview.file.name]} className="h-2 mt-1" />
+                          )}
+                          </>
+                        )}
                       </div>
-                    </FormControl>
-                    <FormDescription>
-                      Upload new images/videos to replace existing ones. If no new files are uploaded, current media will be kept unless cleared below.
-                    </FormDescription>
-                    <FormMessage />
-                    {mediaPreviews.length > 0 && (
-                      <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {mediaPreviews.map((src, index) => {
-                          const isVideo = src.startsWith('data:video') || (src.startsWith('http') && (src.includes('.mp4') || src.includes('.webm') || src.includes('.ogv'))); // Basic check for video
-                          return (
-                            <div key={index} className="relative group aspect-square">
-                              {isVideo ? (
-                                <video src={src} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
-                              ) : (
-                                <NextImage 
-                                  src={src} 
-                                  alt={`Preview ${index + 1}`} 
-                                  layout="fill" 
-                                  objectFit="cover" 
-                                  className="rounded-md border" 
-                                  data-ai-hint="product item"
-                                  onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}
-                                />
-                              )}
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                size="icon"
-                                className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                                onClick={() => removeMediaPreview(index)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </FormItem>
+                    ))}
+                  </div>
                 )}
-              />
-              <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? (
+                {mediaPreviews.length > 0 && (
+                  <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {mediaPreviews.map((preview, index) => (
+                      <div key={index} className="relative group aspect-square">
+                        {preview.type === 'video' ? (
+                          <video src={preview.url} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
+                        ) : (
+                          <NextImage 
+                            src={preview.url} 
+                            alt={`Preview ${index + 1}`} 
+                            layout="fill" 
+                            objectFit="cover" 
+                            className="rounded-md border" 
+                            data-ai-hint="product item"
+                            unoptimized={preview.url.startsWith('blob:')} // Prevent optimization for local blob URLs
+                            onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}
+                          />
+                        )}
+                        {!isUploading && (
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="icon"
+                            className="absolute top-1 right-1 h-6 w-6 opacity-100 group-hover:opacity-100 transition-opacity z-10" // Always visible for edit
+                            onClick={() => removeMedia(index)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </FormItem>
+              <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || isUploading}>
+                {isUploading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Uploading & Saving...
+                  </>
+                ) : form.formState.isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Saving Changes...

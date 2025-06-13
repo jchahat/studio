@@ -15,8 +15,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from 'next/navigation';
-import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X, Video } from 'lucide-react';
-import NextImage from 'next/image'; // Renamed to NextImage to avoid conflict
+import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X, Video, Image as ImageIcon } from 'lucide-react';
+import NextImage from 'next/image';
+import { storage } from '@/lib/firebase'; // Import Firebase storage instance
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { v4 as uuidv4 } from 'uuid'; // For generating unique file names
+import { Progress } from "@/components/ui/progress";
+
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -26,7 +31,7 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  mediaUrls: z.string().optional(), // Stores comma-separated Data URIs from file uploads
+  mediaUrls: z.array(z.string().url({message: "Each media URL must be a valid URL."})).optional().default([]),
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
@@ -35,10 +40,13 @@ export default function AddProductPage() {
   const { addProduct } = useProducts();
   const { toast } = useToast();
   const router = useRouter();
-  const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
-  const [stagedFiles, setStagedFiles] = useState<File[]>([]); // To hold File objects
+  
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  const [mediaPreviews, setMediaPreviews] = useState<{url: string, type: 'image' | 'video'}[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [isUploading, setIsUploading] = useState(false);
 
-  const form = useForm<ProductFormData>({
+  const form = useForm<z.infer<typeof productSchema>>({ // Use inferred type from schema
     resolver: zodResolver(productSchema),
     defaultValues: {
       name: '',
@@ -48,7 +56,7 @@ export default function AddProductPage() {
       stockLevel: 0,
       reorderPoint: 0,
       category: '',
-      mediaUrls: '',
+      mediaUrls: [],
     },
   });
 
@@ -56,63 +64,61 @@ export default function AddProductPage() {
     const files = event.target.files;
     if (files) {
       const newStagedFiles = Array.from(files);
-      setStagedFiles(newStagedFiles);
+      setStagedFiles(prev => [...prev, ...newStagedFiles]);
 
-      const newPreviews: string[] = [];
-      if (newStagedFiles.length === 0) {
-        setMediaPreviews([]);
-        return;
-      }
-
-      newStagedFiles.forEach(file => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          newPreviews.push(reader.result as string);
-          if (newPreviews.length === newStagedFiles.length) {
-            setMediaPreviews(newPreviews);
-          }
-        };
-        reader.readAsDataURL(file);
-      });
+      const newPreviews = newStagedFiles.map(file => ({
+        url: URL.createObjectURL(file),
+        type: file.type.startsWith('video/') ? 'video' : 'image' as 'image' | 'video'
+      }));
+      setMediaPreviews(prev => [...prev, ...newPreviews]);
     }
   };
 
-  const removeMediaPreview = (index: number) => {
-    const newStagedFiles = [...stagedFiles];
-    const newMediaPreviews = [...mediaPreviews];
-    
-    newStagedFiles.splice(index, 1);
-    newMediaPreviews.splice(index, 1);
-    
-    setStagedFiles(newStagedFiles);
-    setMediaPreviews(newMediaPreviews);
-
+  const removeMedia = (index: number) => {
+    setStagedFiles(prev => prev.filter((_, i) => i !== index));
+    setMediaPreviews(prev => prev.filter((_, i) => i !== index));
     // If all files are removed, clear the file input value
     const fileInput = document.getElementById('media-upload') as HTMLInputElement;
-    if (fileInput && newStagedFiles.length === 0) {
+    if (fileInput && stagedFiles.length -1 === 0 ) {
         fileInput.value = ""; 
     }
   };
 
-  async function onSubmit(values: ProductFormData) {
+  async function onSubmit(values: z.infer<typeof productSchema>) {
+    setIsUploading(true);
+    setUploadProgress({});
+    let uploadedUrls: string[] = [];
+
     try {
-      let mediaDataUris: string[] = [];
       if (stagedFiles.length > 0) {
-        mediaDataUris = await Promise.all(
-          stagedFiles.map(file => {
-            return new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(file);
-            });
-          })
-        );
+        const uploadPromises = stagedFiles.map(file => {
+          const fileId = uuidv4();
+          const storageRef = ref(storage, `products/${fileId}-${file.name}`);
+          const uploadTask = uploadBytesResumable(storageRef, file);
+
+          return new Promise<string>((resolve, reject) => {
+            uploadTask.on('state_changed',
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                setUploadProgress(prev => ({ ...prev, [file.name]: progress }));
+              },
+              (error) => {
+                console.error("Upload failed for file:", file.name, error);
+                reject(error);
+              },
+              async () => {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(downloadURL);
+              }
+            );
+          });
+        });
+        uploadedUrls = await Promise.all(uploadPromises);
       }
       
-      const submissionValues = {
+      const submissionValues: ProductFormData = { // Ensure this matches ProductFormData
         ...values,
-        mediaUrls: mediaDataUris.join(','), // Send Data URIs as a comma-separated string
+        mediaUrls: uploadedUrls,
       };
 
       await addProduct(submissionValues);
@@ -121,17 +127,21 @@ export default function AddProductPage() {
         description: `${values.name} has been successfully added to the inventory.`,
       });
       form.reset();
-      setMediaPreviews([]);
       setStagedFiles([]);
+      setMediaPreviews([]);
       const fileInput = document.getElementById('media-upload') as HTMLInputElement;
       if (fileInput) fileInput.value = "";
       router.push('/products');
+
     } catch (error: any) {
       toast({
         title: "Error Adding Product",
         description: error.message || "Could not add the product. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsUploading(false);
+      setUploadProgress({});
     }
   }
 
@@ -264,59 +274,70 @@ export default function AddProductPage() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="mediaUrls" 
-                render={({ field }) => ( // field.value will be a string of comma-separated Data URIs on submit
-                  <FormItem>
-                    <FormLabel>Product Media (Images/Videos)</FormLabel>
-                    <FormControl>
-                      <div className="flex items-center gap-2">
-                        <UploadCloud className="h-5 w-5 text-muted-foreground" />
-                        <Input 
-                          id="media-upload"
-                          type="file" 
-                          multiple 
-                          accept="image/*,video/*" // Accept images and videos
-                          onChange={handleFileChange}
-                          className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-                        />
+              <FormItem>
+                <FormLabel>Product Media (Images/Videos)</FormLabel>
+                <FormControl>
+                  <div className="flex items-center gap-2">
+                    <UploadCloud className="h-5 w-5 text-muted-foreground" />
+                    <Input 
+                      id="media-upload"
+                      type="file" 
+                      multiple 
+                      accept="image/*,video/*"
+                      onChange={handleFileChange}
+                      className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                      disabled={isUploading}
+                    />
+                  </div>
+                </FormControl>
+                <FormDescription>
+                  Upload one or more images or videos for the product.
+                </FormDescription>
+                <FormMessage />
+                {stagedFiles.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    {stagedFiles.map((file, index) => (
+                      <div key={index} className="text-xs text-muted-foreground">
+                        <span>{file.name} ({(file.size / 1024).toFixed(2)} KB)</span>
+                        {uploadProgress[file.name] !== undefined && (
+                          <Progress value={uploadProgress[file.name]} className="h-2 mt-1" />
+                        )}
                       </div>
-                    </FormControl>
-                    <FormDescription>
-                      Upload one or more images or videos for the product. Re-uploading will replace existing selections.
-                    </FormDescription>
-                    <FormMessage />
-                    {mediaPreviews.length > 0 && (
-                      <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {mediaPreviews.map((src, index) => {
-                          const isVideo = src.startsWith('data:video');
-                          return (
-                            <div key={index} className="relative group aspect-square">
-                              {isVideo ? (
-                                <video src={src} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
-                              ) : (
-                                <NextImage src={src} alt={`Preview ${index + 1}`} layout="fill" objectFit="cover" className="rounded-md border" data-ai-hint="product item" onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}/>
-                              )}
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                size="icon"
-                                className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                                onClick={() => removeMediaPreview(index)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </FormItem>
+                    ))}
+                  </div>
                 )}
-              />
-              <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? (
+                {mediaPreviews.length > 0 && (
+                  <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {mediaPreviews.map((preview, index) => (
+                      <div key={index} className="relative group aspect-square">
+                        {preview.type === 'video' ? (
+                          <video src={preview.url} controls muted loop className="rounded-md object-cover w-full h-full border" data-ai-hint="product video" />
+                        ) : (
+                          <NextImage src={preview.url} alt={`Preview ${index + 1}`} layout="fill" objectFit="cover" className="rounded-md border" data-ai-hint="product item" onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}/>
+                        )}
+                        {!isUploading && (
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="icon"
+                            className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                            onClick={() => removeMedia(index)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </FormItem>
+              <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || isUploading}>
+                {isUploading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Uploading & Adding...
+                  </>
+                ) : form.formState.isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Adding Product...
@@ -330,3 +351,4 @@ export default function AddProductPage() {
     </div>
   );
 }
+
