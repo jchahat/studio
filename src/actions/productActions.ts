@@ -48,6 +48,7 @@ function mongoDocToProduct(doc: any): Product {
   }
   return {
     id: doc._id.toString(),
+<<<<<<< HEAD
     name: ensureString(doc.name),
     description: ensureString(doc.description),
     price: ensureNumber(doc.price, 0.01), 
@@ -61,6 +62,29 @@ function mongoDocToProduct(doc: any): Product {
   };
 }
 
+=======
+    name: doc.name,
+    description: doc.description,
+    price: Number(doc.price),
+    discountPercentage: doc.discountPercentage !== undefined ? Number(doc.discountPercentage) : 0,
+    stockLevel: Number(doc.stockLevel),
+    reorderPoint: Number(doc.reorderPoint),
+    category: doc.category,
+    imageUrls: Array.isArray(doc.imageUrls) && doc.imageUrls.length > 0 
+                 ? doc.imageUrls 
+                 : [`https://placehold.co/300x200.png?text=${encodeURIComponent(doc.name) || 'Product'}`],
+  };
+}
+
+function parseImageUrls(urlsString?: string, productName?: string): string[] {
+  if (urlsString && urlsString.trim() !== '') {
+    const urls = urlsString.split(',').map(url => url.trim()).filter(url => url !== '');
+    if (urls.length > 0) return urls;
+  }
+  return [`https://placehold.co/300x200.png?text=${encodeURIComponent(productName || 'Product')}`];
+}
+
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
 
 export async function fetchProductsAction(): Promise<Product[]> {
   try {
@@ -76,6 +100,7 @@ export async function fetchProductsAction(): Promise<Product[]> {
 export async function addProductAction(productData: ProductFormData): Promise<Product> {
   try {
     const productsCollection = await getProductsStore();
+<<<<<<< HEAD
 
     const productDocument = {
       name: ensureString(productData.name),
@@ -93,6 +118,36 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
     const insertedDoc = { _id: result.insertedId, ...productDocument };
     return mongoDocToProduct(insertedDoc);
 
+=======
+    const parsedImageUrls = parseImageUrls(productData.imageUrls, productData.name);
+
+    const productDocument = {
+      name: productData.name,
+      description: productData.description,
+      price: Number(productData.price),
+      discountPercentage: Number(productData.discountPercentage ?? 0),
+      stockLevel: Number(productData.stockLevel),
+      reorderPoint: Number(productData.reorderPoint),
+      category: productData.category,
+      imageUrls: parsedImageUrls,
+    };
+
+    const result = await productsCollection.insertOne(productDocument as Omit<Product, 'id'>);
+    
+    // Construct the Product object carefully for return
+    const newProduct: Product = {
+      id: result.insertedId.toString(),
+      name: productDocument.name,
+      description: productDocument.description,
+      price: productDocument.price,
+      discountPercentage: productDocument.discountPercentage,
+      stockLevel: productDocument.stockLevel,
+      reorderPoint: productDocument.reorderPoint,
+      category: productDocument.category,
+      imageUrls: productDocument.imageUrls,
+    };
+    return newProduct;
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
   } catch (e: any) {
     console.error("Failed to add product to DB:", e);
     throw new Error(`Failed to add product to database. Original error: ${e.message || String(e)}`);
@@ -117,6 +172,7 @@ export async function updateProductAction(productId: string, productData: Produc
     } else if (Object.prototype.hasOwnProperty.call(productData, 'discountPercentage')) { 
         updateDocument.discountPercentage = 0; 
     }
+<<<<<<< HEAD
 
     if (productData.stockLevel !== undefined) updateDocument.stockLevel = ensureNumber(productData.stockLevel, 0);
     if (productData.reorderPoint !== undefined) updateDocument.reorderPoint = ensureNumber(productData.reorderPoint, 0);
@@ -124,11 +180,22 @@ export async function updateProductAction(productId: string, productData: Produc
 
     if (productData.mediaUrls !== undefined) {
       updateDocument.mediaUrls = Array.isArray(productData.mediaUrls) ? productData.mediaUrls.map(ensureString).filter(url => url !== '') : [];
+=======
+    if (productData.stockLevel !== undefined) updateDocument.stockLevel = Number(productData.stockLevel);
+    if (productData.reorderPoint !== undefined) updateDocument.reorderPoint = Number(productData.reorderPoint);
+    if (productData.category !== undefined) updateDocument.category = productData.category;
+    if (productData.imageUrls !== undefined) {
+      updateDocument.imageUrls = parseImageUrls(productData.imageUrls, productData.name);
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
     }
 
     if (Object.keys(updateDocument).length === 0) {
+<<<<<<< HEAD
         const currentProduct = await getProductByIdAction(productId);
         return currentProduct;
+=======
+        return getProductByIdAction(productId);
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
     }
 
     const result = await productsCollection.findOneAndUpdate(

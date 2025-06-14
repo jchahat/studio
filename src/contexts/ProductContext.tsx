@@ -79,12 +79,11 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
       }
       setLoading(false);
       return updatedProduct || undefined;
-    } catch (e: any)
-     {
+    } catch (e: any) {
       console.error("ProductContext: Failed to update product:", e);
       setError(e.message || "Failed to update product in database.");
       setLoading(false);
-      await refreshProducts(); 
+      await refreshProducts(); // Re-fetch on error
       throw e;
     }
   };

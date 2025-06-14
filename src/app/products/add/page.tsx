@@ -15,11 +15,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from 'next/navigation';
+<<<<<<< HEAD
 import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X, Video, Image as ImageIcon } from 'lucide-react';
 import NextImage from 'next/image';
 import { Progress } from "@/components/ui/progress";
 import { getB2UploadCredentialsAction } from '@/actions/b2Actions';
 import axios from 'axios';
+=======
+import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X } from 'lucide-react';
+import Image from 'next/image';
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
 
 const productSchema = z.object({
   name: z.string().min(2, { message: "Product name must be at least 2 characters." }),
@@ -29,7 +34,11 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
+<<<<<<< HEAD
   mediaUrls: z.array(z.string().url({message: "Each media URL must be a valid URL."})).optional().default([]), 
+=======
+  imageUrls: z.string().optional(), // Will store comma-separated Data URIs or be empty
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
@@ -48,9 +57,14 @@ export default function AddProductPage() {
   const { addProduct } = useProducts();
   const { toast } = useToast();
   const router = useRouter();
+<<<<<<< HEAD
   
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [isUploadingGlobal, setIsUploadingGlobal] = useState(false); 
+=======
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
 
   const form = useForm<z.infer<typeof productSchema>>({ 
     resolver: zodResolver(productSchema),
@@ -62,13 +76,18 @@ export default function AddProductPage() {
       stockLevel: 0,
       reorderPoint: 0,
       category: '',
+<<<<<<< HEAD
       mediaUrls: [],
+=======
+      imageUrls: '',
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
     },
   });
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files) {
+<<<<<<< HEAD
       const newStagedFiles: StagedFile[] = Array.from(files).map(file => ({
         file,
         id: crypto.randomUUID(),
@@ -86,6 +105,39 @@ export default function AddProductPage() {
     if (fileInput && stagedFiles.filter(sf => sf.id !== id).length === 0 ) {
         fileInput.value = ""; 
     }
+=======
+      const newPreviews: string[] = [];
+      const newImageFiles: File[] = Array.from(files);
+      
+      setImageFiles(newImageFiles);
+
+      newImageFiles.forEach(file => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          newPreviews.push(reader.result as string);
+          if (newPreviews.length === newImageFiles.length) {
+            setImagePreviews([...newPreviews]);
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+      if (newImageFiles.length === 0) { // Handle case where all files are deselected
+        setImagePreviews([]);
+      }
+    }
+  };
+
+  const removeImage = (index: number) => {
+    const newImageFiles = [...imageFiles];
+    const newImagePreviews = [...imagePreviews];
+    newImageFiles.splice(index, 1);
+    newImagePreviews.splice(index, 1);
+    setImageFiles(newImageFiles);
+    setImagePreviews(newImagePreviews);
+
+    // Update the underlying file input if possible (this is tricky and often not fully supported)
+    // For simplicity, we manage file list in state and construct imageUrls on submit.
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
   };
 
   const uploadFileToB2 = async (stagedFile: StagedFile): Promise<string> => {
@@ -122,6 +174,7 @@ export default function AddProductPage() {
     let uploadedUrls: string[] = [];
 
     try {
+<<<<<<< HEAD
       if (stagedFiles.length > 0) {
         const uploadPromises = stagedFiles.map(sf => {
           if (sf.b2Url) return Promise.resolve(sf.b2Url); // Already uploaded (e.g. if submit failed before)
@@ -129,10 +182,27 @@ export default function AddProductPage() {
         });
         uploadedUrls = await Promise.all(uploadPromises);
       }
+=======
+      // Convert imageFiles to Data URIs and join them
+      const dataUris = await Promise.all(
+        imageFiles.map(file => {
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        })
+      );
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
       
       const submissionValues: ProductFormData = { 
         ...values,
+<<<<<<< HEAD
         mediaUrls: uploadedUrls,
+=======
+        imageUrls: dataUris.join(','),
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
       };
 
       await addProduct(submissionValues);
@@ -141,9 +211,14 @@ export default function AddProductPage() {
         description: `${values.name} has been successfully added to the inventory.`,
       });
       form.reset();
+<<<<<<< HEAD
       setStagedFiles([]);
       const fileInput = document.getElementById('media-upload') as HTMLInputElement;
       if (fileInput) fileInput.value = "";
+=======
+      setImagePreviews([]);
+      setImageFiles([]);
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
       router.push('/products');
 
     } catch (error: any) {
@@ -286,6 +361,7 @@ export default function AddProductPage() {
                   </FormItem>
                 )}
               />
+<<<<<<< HEAD
               <FormItem>
                 <FormLabel>Product Media (Images/Videos)</FormLabel>
                 <FormControl>
@@ -326,6 +402,49 @@ export default function AddProductPage() {
                       </div>
                     ))}
                   </div>
+=======
+              <FormField
+                control={form.control}
+                name="imageUrls" 
+                render={({ field }) => ( 
+                  <FormItem>
+                    <FormLabel>Product Images (Optional)</FormLabel>
+                    <FormControl>
+                      <div className="flex items-center gap-2">
+                        <UploadCloud className="h-5 w-5 text-muted-foreground" />
+                        <Input 
+                          type="file" 
+                          multiple 
+                          accept="image/*"
+                          onChange={handleImageChange}
+                          className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                        />
+                      </div>
+                    </FormControl>
+                    <FormDescription>
+                      Upload one or more images for the product. Re-uploading will replace existing selections.
+                    </FormDescription>
+                    <FormMessage />
+                    {imagePreviews.length > 0 && (
+                      <div className="mt-4 grid grid-cols-3 gap-4">
+                        {imagePreviews.map((src, index) => (
+                          <div key={index} className="relative group">
+                            <Image src={src} alt={`Preview ${index + 1}`} width={100} height={100} className="rounded-md object-cover aspect-square border" data-ai-hint="product item"/>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="icon"
+                              className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => removeImage(index)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </FormItem>
+>>>>>>> parent of 416606e (It should display the product page and Existing images and allow them to)
                 )}
                 {stagedFiles.filter(sf => sf.previewUrl).length > 0 && (
                   <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
