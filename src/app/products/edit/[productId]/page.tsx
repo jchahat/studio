@@ -38,9 +38,9 @@ const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries
 type DisplayMedia = { 
   url: string; 
   type: 'image' | 'video'; 
-  isNew?: boolean; // True if it's a local file preview, false if it's an existing B2 URL
-  file?: File; // The actual file object for new uploads
-  id: string; // Unique ID for keying and tracking
+  isNew?: boolean; 
+  file?: File; 
+  id: string; 
   progress?: number;
   error?: string;
 };
@@ -59,7 +59,6 @@ export default function EditProductPage() {
   
   const [displayMedia, setDisplayMedia] = useState<DisplayMedia[]>([]);
   const [isUploadingGlobal, setIsUploadingGlobal] = useState(false);
-  // URLs of existing B2 files that were removed by the user (actual deletion from B2 is not implemented here)
   const [removedB2Urls, setRemovedB2Urls] = useState<string[]>([]);
 
 
@@ -79,9 +78,9 @@ export default function EditProductPage() {
     if (productData.mediaUrls && productData.mediaUrls.length > 0) {
       setDisplayMedia(productData.mediaUrls.map(url => ({
         url,
-        type: url.includes('.mp4') || url.includes('.webm') || url.includes('video') ? 'video' : 'image', // Basic type detection
+        type: url.includes('.mp4') || url.includes('.webm') || url.includes('video') ? 'video' : 'image', 
         isNew: false,
-        id: crypto.randomUUID(), // Assign a new ID for React key purposes
+        id: crypto.randomUUID(), 
       })));
     } else {
       setDisplayMedia([]);
@@ -124,7 +123,7 @@ export default function EditProductPage() {
     if (files) {
       const newFilesArray: DisplayMedia[] = Array.from(files).map(file => ({
         file,
-        url: URL.createObjectURL(file), // This is the local preview URL
+        url: URL.createObjectURL(file), 
         type: file.type.startsWith('video/') ? 'video' : 'image',
         isNew: true,
         id: crypto.randomUUID(),
@@ -136,9 +135,8 @@ export default function EditProductPage() {
 
   const removeMedia = (id: string) => {
     const itemToRemove = displayMedia.find(dm => dm.id === id);
-    if (itemToRemove && !itemToRemove.isNew) { // If it's an existing B2 URL
+    if (itemToRemove && !itemToRemove.isNew) { 
       setRemovedB2Urls(prev => [...prev, itemToRemove.url]);
-      // Note: Actual deletion from B2 is not handled here. That would require another server action.
     }
     setDisplayMedia(prev => prev.filter(dm => dm.id !== id));
     
@@ -168,7 +166,7 @@ export default function EditProductPage() {
         },
       });
       const publicUrl = `${b2Creds.publicFileUrlBase}/${b2Creds.finalFileName}`;
-      setDisplayMedia(prev => prev.map(dm => dm.id === mediaItem.id ? {...dm, url: publicUrl, progress: 100, isNew: false} : dm)); // Update URL to B2 URL
+      setDisplayMedia(prev => prev.map(dm => dm.id === mediaItem.id ? {...dm, url: publicUrl, progress: 100, isNew: false} : dm)); 
       return publicUrl;
     } catch (error: any) {
         console.error("B2 Upload failed for file:", mediaItem.file.name, error);
@@ -185,13 +183,11 @@ export default function EditProductPage() {
     let finalMediaUrls: string[] = [];
 
     try {
-      // Get URLs of existing files that were NOT removed
       const existingKeptUrls = displayMedia
         .filter(dm => !dm.isNew && !removedB2Urls.includes(dm.url))
         .map(dm => dm.url);
       finalMediaUrls.push(...existingKeptUrls);
 
-      // Upload new files
       const newFilesToUpload = displayMedia.filter(dm => dm.isNew && dm.file);
       if (newFilesToUpload.length > 0) {
         const uploadPromises = newFilesToUpload.map(dm => uploadFileToB2(dm));
@@ -263,7 +259,7 @@ export default function EditProductPage() {
     );
   }
   
-  if (!product) {
+  if (!product && !isLoadingProduct && !fetchError) {
      return (
       <div className="max-w-2xl mx-auto text-center py-10">
         <PackageOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -280,7 +276,7 @@ export default function EditProductPage() {
         <Edit className="h-8 w-8 text-primary" />
         <div>
           <h1 className="text-3xl font-bold font-headline">Edit Product</h1>
-          <p className="text-muted-foreground">Modify the details for "{form.getValues('name') || product.name}".</p>
+          <p className="text-muted-foreground">Modify the details for "{form.getValues('name') || product?.name}".</p>
         </div>
       </div>
       
@@ -292,15 +288,15 @@ export default function EditProductPage() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField control={form.control} name="name" render={({ field }) => ( <FormItem> <FormLabel>Product Name</FormLabel> <FormControl> <Input placeholder="e.g., Wireless Keyboard" {...field} /> </FormControl> <FormMessage /> </FormItem> )} />
-              <FormField control={form.control} name="description" render={({ field }) => ( <FormItem> <FormLabel>Description</FormLabel> <FormControl> <Textarea placeholder="Describe the product..." {...field} rows={3} /> </FormControl> <FormMessage /> </FormItem> )} />
+              <FormField control={form.control} name="name" render={({ field }) => ( <FormItem> <FormLabel>Product Name</FormLabel> <FormControl> <Input placeholder="e.g., Wireless Keyboard" {...field} value={field.value || ''} /> </FormControl> <FormMessage /> </FormItem> )} />
+              <FormField control={form.control} name="description" render={({ field }) => ( <FormItem> <FormLabel>Description</FormLabel> <FormControl> <Textarea placeholder="Describe the product..." {...field} value={field.value || ''} rows={3} /> </FormControl> <FormMessage /> </FormItem> )} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField control={form.control} name="price" render={({ field }) => ( <FormItem> <FormLabel>Price</FormLabel> <FormControl> <div className="relative"> <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /> <Input type="number" step="0.01" placeholder="0.00" {...field} className="pl-8" /> </div> </FormControl> <FormMessage /> </FormItem> )} />
-                <FormField control={form.control} name="discountPercentage" render={({ field }) => ( <FormItem> <FormLabel>Discount (%)</FormLabel> <FormControl> <div className="relative"> <Percent className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /> <Input type="number" step="1" placeholder="0" {...field} className="pl-8" /> </div> </FormControl> <FormDescription>Enter a value between 0 and 100.</FormDescription> <FormMessage /> </FormItem> )} />
+                <FormField control={form.control} name="price" render={({ field }) => ( <FormItem> <FormLabel>Price</FormLabel> <FormControl> <div className="relative"> <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /> <Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value === undefined ? '' : field.value} className="pl-8" /> </div> </FormControl> <FormMessage /> </FormItem> )} />
+                <FormField control={form.control} name="discountPercentage" render={({ field }) => ( <FormItem> <FormLabel>Discount (%)</FormLabel> <FormControl> <div className="relative"> <Percent className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /> <Input type="number" step="1" placeholder="0" {...field} value={field.value === undefined ? '' : field.value} className="pl-8" /> </div> </FormControl> <FormDescription>Enter a value between 0 and 100.</FormDescription> <FormMessage /> </FormItem> )} />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField control={form.control} name="stockLevel" render={({ field }) => ( <FormItem> <FormLabel>Stock Level</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} /> </FormControl> <FormMessage /> </FormItem> )} />
-                <FormField control={form.control} name="reorderPoint" render={({ field }) => ( <FormItem> <FormLabel>Reorder Point</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} /> </FormControl> <FormMessage /> </FormItem> )} />
+                <FormField control={form.control} name="stockLevel" render={({ field }) => ( <FormItem> <FormLabel>Stock Level</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} value={field.value === undefined ? '' : field.value}/> </FormControl> <FormMessage /> </FormItem> )} />
+                <FormField control={form.control} name="reorderPoint" render={({ field }) => ( <FormItem> <FormLabel>Reorder Point</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} value={field.value === undefined ? '' : field.value}/> </FormControl> <FormMessage /> </FormItem> )} />
               </div>
               <FormField
                 control={form.control}
@@ -308,9 +304,12 @@ export default function EditProductPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Category</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select 
+                      onValueChange={field.onChange} 
+                      value={typeof field.value === 'string' ? field.value : ''} // Ensure value is always a string
+                    >
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger ref={field.ref}> {/* react-hook-form ref for focus/validation */}
                           <SelectValue placeholder="Select a category" />
                         </SelectTrigger>
                       </FormControl>
@@ -378,7 +377,7 @@ export default function EditProductPage() {
                             <NextImage 
                               src={dm.url} alt={`Preview for ${dm.id}`} layout="fill" objectFit="cover" 
                               className="rounded-md border" data-ai-hint="product item"
-                              unoptimized={dm.isNew} // Only unoptimize local blob previews
+                              unoptimized={dm.isNew} 
                               onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}
                             />
                           )}
