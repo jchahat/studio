@@ -292,7 +292,6 @@ export default function EditProductPage() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              {/* Other FormFields remain the same */}
               <FormField control={form.control} name="name" render={({ field }) => ( <FormItem> <FormLabel>Product Name</FormLabel> <FormControl> <Input placeholder="e.g., Wireless Keyboard" {...field} /> </FormControl> <FormMessage /> </FormItem> )} />
               <FormField control={form.control} name="description" render={({ field }) => ( <FormItem> <FormLabel>Description</FormLabel> <FormControl> <Textarea placeholder="Describe the product..." {...field} rows={3} /> </FormControl> <FormMessage /> </FormItem> )} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -303,7 +302,28 @@ export default function EditProductPage() {
                 <FormField control={form.control} name="stockLevel" render={({ field }) => ( <FormItem> <FormLabel>Stock Level</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} /> </FormControl> <FormMessage /> </FormItem> )} />
                 <FormField control={form.control} name="reorderPoint" render={({ field }) => ( <FormItem> <FormLabel>Reorder Point</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} /> </FormControl> <FormMessage /> </FormItem> )} />
               </div>
-              <FormField control={form.control} name="category" render={({ field }) => ( <FormItem> <FormLabel>Category</FormLabel> <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}> <FormControl> <SelectTrigger> <SelectValue placeholder="Select a category" /> </SelectTrigger> </FormControl> <SelectContent> {categories.map(category => ( <SelectItem key={category} value={category}>{category}</SelectItem> ))} </SelectContent> </Select> <FormMessage /> </FormItem> )} />
+              <FormField
+                control={form.control}
+                name="category"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {categories.map(category => (
+                          <SelectItem key={category} value={category}>{category}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               
               <FormItem>
                 <FormLabel>Product Media (Images/Videos)</FormLabel>
@@ -387,3 +407,5 @@ export default function EditProductPage() {
     </div>
   );
 }
+
+    

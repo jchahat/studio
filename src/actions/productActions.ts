@@ -24,21 +24,21 @@ function ensureString(value: any): string {
 // Helper to ensure a value is a number, defaulting to a specified value (typically 0)
 function ensureNumber(value: any, defaultValue = 0): number {
   const num = Number(value);
-  return isNaN(num) ? defaultValue : num;
+  return isNaN(num) || !isFinite(num) ? defaultValue : num;
 }
 
 // Helper to convert MongoDB document to Product type with robust type coercion
 function mongoDocToProduct(doc: any): Product {
-  if (!doc || !doc._id) {
-    console.error("Invalid or empty document passed to mongoDocToProduct:", doc);
+  if (!doc || !doc._id || !ObjectId.isValid(doc._id)) {
+    console.error("Invalid or empty document/ID passed to mongoDocToProduct:", doc);
     // Provide a default structure if the doc is fundamentally invalid
     // This helps prevent downstream errors in forms if, for example, a product is unexpectedly null
-    const newId = new ObjectId().toString(); // Generate a temporary valid ID
+    const newId = new ObjectId().toString(); 
     return {
         id: newId,
         name: '',
         description: '',
-        price: 0, // Default to 0, Zod schema validation will catch if min not met
+        price: 0.01, // Align with Zod schema min(0.01)
         discountPercentage: 0,
         stockLevel: 0,
         reorderPoint: 0,
@@ -50,14 +50,14 @@ function mongoDocToProduct(doc: any): Product {
     id: doc._id.toString(),
     name: ensureString(doc.name),
     description: ensureString(doc.description),
-    price: ensureNumber(doc.price, 0), // Ensure price is a number, default to 0
-    discountPercentage: ensureNumber(doc.discountPercentage, 0), // Ensure discount is a number, default to 0
-    stockLevel: ensureNumber(doc.stockLevel, 0), // Ensure stockLevel is an integer, default to 0
-    reorderPoint: ensureNumber(doc.reorderPoint, 0), // Ensure reorderPoint is an integer, default to 0
+    price: ensureNumber(doc.price, 0.01), 
+    discountPercentage: ensureNumber(doc.discountPercentage, 0), 
+    stockLevel: ensureNumber(doc.stockLevel, 0), 
+    reorderPoint: ensureNumber(doc.reorderPoint, 0), 
     category: ensureString(doc.category),
     mediaUrls: Array.isArray(doc.mediaUrls) && doc.mediaUrls.length > 0
-                 ? doc.mediaUrls.map(url => ensureString(url)).filter(url => url !== '') // Ensure all URLs are non-empty strings
-                 : [], // Default to empty array if no mediaUrls or if it's not an array
+                 ? doc.mediaUrls.map(url => ensureString(url)).filter(url => url !== '') 
+                 : [], 
   };
 }
 
@@ -77,11 +77,10 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
   try {
     const productsCollection = await getProductsStore();
 
-    // Ensure data types before insertion, consistent with ProductFormData and Product types
     const productDocument = {
       name: ensureString(productData.name),
       description: ensureString(productData.description),
-      price: ensureNumber(productData.price, 0.01), // Default to 0.01 if coercion fails, respecting min price
+      price: ensureNumber(productData.price, 0.01), 
       discountPercentage: ensureNumber(productData.discountPercentage, 0),
       stockLevel: ensureNumber(productData.stockLevel, 0),
       reorderPoint: ensureNumber(productData.reorderPoint, 0),
@@ -103,6 +102,10 @@ export async function addProductAction(productData: ProductFormData): Promise<Pr
 export async function updateProductAction(productId: string, productData: ProductUpdateData): Promise<Product | null> {
   try {
     const productsCollection = await getProductsStore();
+    if (!ObjectId.isValid(productId)) {
+        console.warn(`Invalid Product ID format for update: ${productId}`);
+        return null; // Or throw an error
+    }
 
     const updateDocument: Partial<Omit<Product, 'id'>> = {};
     if (productData.name !== undefined) updateDocument.name = ensureString(productData.name);
@@ -111,7 +114,7 @@ export async function updateProductAction(productId: string, productData: Produc
     
     if (productData.discountPercentage !== undefined) {
         updateDocument.discountPercentage = ensureNumber(productData.discountPercentage, 0);
-    } else if (Object.prototype.hasOwnProperty.call(productData, 'discountPercentage')) { // Check if key exists, even if undefined
+    } else if (Object.prototype.hasOwnProperty.call(productData, 'discountPercentage')) { 
         updateDocument.discountPercentage = 0; 
     }
 
@@ -124,7 +127,6 @@ export async function updateProductAction(productId: string, productData: Produc
     }
 
     if (Object.keys(updateDocument).length === 0) {
-        // If nothing to update, fetch and return current product to avoid unnecessary DB call
         const currentProduct = await getProductByIdAction(productId);
         return currentProduct;
     }
@@ -149,6 +151,10 @@ export async function updateProductAction(productId: string, productData: Produc
 export async function updateProductStockAction(productId: string, newStockLevel: number): Promise<void> {
   try {
     const productsCollection = await getProductsStore();
+     if (!ObjectId.isValid(productId)) {
+        console.warn(`Invalid Product ID format for stock update: ${productId}`);
+        throw new Error(`Invalid Product ID format: ${productId}`);
+    }
     await productsCollection.updateOne(
       { _id: new ObjectId(productId) },
       { $set: { stockLevel: ensureNumber(newStockLevel, 0) } }
@@ -162,6 +168,10 @@ export async function updateProductStockAction(productId: string, newStockLevel:
 export async function deleteProductAction(productId: string): Promise<void> {
   try {
     const productsCollection = await getProductsStore();
+    if (!ObjectId.isValid(productId)) {
+        console.warn(`Invalid Product ID format for delete: ${productId}`);
+        throw new Error(`Invalid Product ID format: ${productId}`);
+    }
     await productsCollection.deleteOne({ _id: new ObjectId(productId) });
   } catch (e: any) {
     console.error("Failed to delete product from DB:", e);
@@ -183,10 +193,14 @@ export async function getProductByIdAction(productId: string): Promise<Product |
     return null;
   } catch (e: any) {
     console.error("Failed to get product by ID from DB:", e);
-    // Avoid throwing generic error if ID format is the issue, already handled.
+    // Avoid re-throwing for BSON errors if ID was valid but findOne failed for other BSON reasons
     if (!(e instanceof TypeError && e.message.includes("Argument passed in must be a string of 12 bytes or a string of 24 hex characters"))) {
-        throw new Error(`Failed to get product by ID from database. Original error: ${e.message || String(e)}`);
+        // throw new Error(`Failed to get product by ID from database. Original error: ${e.message || String(e)}`);
+        // Instead of throwing, log and return null as product not found due to error
+        console.error(`Database error fetching product ID ${productId}: ${e.message || String(e)}`);
     }
-    return null; // Return null for other BSON/ObjectId errors during findOne
+    return null; 
   }
 }
+
+    
