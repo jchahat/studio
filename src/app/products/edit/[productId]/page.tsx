@@ -78,7 +78,7 @@ export default function EditProductPage() {
     if (productData.mediaUrls && productData.mediaUrls.length > 0) {
       setDisplayMedia(productData.mediaUrls.map(url => ({
         url,
-        type: url.includes('.mp4') || url.includes('.webm') || url.includes('video') ? 'video' : 'image', 
+        type: url.includes('.mp4') || url.includes('.webm') || url.includes('video') || url.startsWith('data:video') ? 'video' : 'image', 
         isNew: false,
         id: crypto.randomUUID(), 
       })));
@@ -137,6 +137,8 @@ export default function EditProductPage() {
     const itemToRemove = displayMedia.find(dm => dm.id === id);
     if (itemToRemove && !itemToRemove.isNew) { 
       setRemovedB2Urls(prev => [...prev, itemToRemove.url]);
+      // Note: Actual B2 file deletion is not implemented here.
+      // This only removes it from the product's list of media.
     }
     setDisplayMedia(prev => prev.filter(dm => dm.id !== id));
     
@@ -151,7 +153,7 @@ export default function EditProductPage() {
     try {
       const b2Creds = await getB2UploadCredentialsAction(mediaItem.file.name);
       
-      const response = await axios.post(b2Creds.uploadUrl, mediaItem.file, {
+      await axios.post(b2Creds.uploadUrl, mediaItem.file, {
         headers: {
           'Authorization': b2Creds.authToken,
           'X-Bz-File-Name': b2Creds.finalFileName,
@@ -183,11 +185,13 @@ export default function EditProductPage() {
     let finalMediaUrls: string[] = [];
 
     try {
+      // Keep existing URLs that weren't explicitly removed
       const existingKeptUrls = displayMedia
         .filter(dm => !dm.isNew && !removedB2Urls.includes(dm.url))
         .map(dm => dm.url);
       finalMediaUrls.push(...existingKeptUrls);
 
+      // Upload new files
       const newFilesToUpload = displayMedia.filter(dm => dm.isNew && dm.file);
       if (newFilesToUpload.length > 0) {
         const uploadPromises = newFilesToUpload.map(dm => uploadFileToB2(dm));
@@ -196,8 +200,8 @@ export default function EditProductPage() {
       }
       
       const submissionValues: ProductUpdateData = {
-        ...values,
-        mediaUrls: finalMediaUrls,
+        ...values, // Contains name, description, price, etc. from the form
+        mediaUrls: finalMediaUrls, // The consolidated list of B2 URLs
       };
 
       await updateProduct(productId, submissionValues);
@@ -288,15 +292,94 @@ export default function EditProductPage() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField control={form.control} name="name" render={({ field }) => ( <FormItem> <FormLabel>Product Name</FormLabel> <FormControl> <Input placeholder="e.g., Wireless Keyboard" {...field} value={field.value || ''} /> </FormControl> <FormMessage /> </FormItem> )} />
-              <FormField control={form.control} name="description" render={({ field }) => ( <FormItem> <FormLabel>Description</FormLabel> <FormControl> <Textarea placeholder="Describe the product..." {...field} value={field.value || ''} rows={3} /> </FormControl> <FormMessage /> </FormItem> )} />
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Product Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., Wireless Keyboard" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea placeholder="Describe the product..." {...field} rows={3} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField control={form.control} name="price" render={({ field }) => ( <FormItem> <FormLabel>Price</FormLabel> <FormControl> <div className="relative"> <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /> <Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value === undefined ? '' : field.value} className="pl-8" /> </div> </FormControl> <FormMessage /> </FormItem> )} />
-                <FormField control={form.control} name="discountPercentage" render={({ field }) => ( <FormItem> <FormLabel>Discount (%)</FormLabel> <FormControl> <div className="relative"> <Percent className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /> <Input type="number" step="1" placeholder="0" {...field} value={field.value === undefined ? '' : field.value} className="pl-8" /> </div> </FormControl> <FormDescription>Enter a value between 0 and 100.</FormDescription> <FormMessage /> </FormItem> )} />
+                <FormField
+                  control={form.control}
+                  name="price"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Price</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                           <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                           <Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} className="pl-8" />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="discountPercentage"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Discount (%)</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                           <Percent className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                           <Input type="number" step="1" placeholder="0" {...field} value={field.value ?? ''} className="pl-8" />
+                        </div>
+                      </FormControl>
+                       <FormDescription>Enter a value between 0 and 100.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField control={form.control} name="stockLevel" render={({ field }) => ( <FormItem> <FormLabel>Stock Level</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} value={field.value === undefined ? '' : field.value}/> </FormControl> <FormMessage /> </FormItem> )} />
-                <FormField control={form.control} name="reorderPoint" render={({ field }) => ( <FormItem> <FormLabel>Reorder Point</FormLabel> <FormControl> <Input type="number" placeholder="0" {...field} value={field.value === undefined ? '' : field.value}/> </FormControl> <FormMessage /> </FormItem> )} />
+                <FormField
+                  control={form.control}
+                  name="stockLevel"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Stock Level</FormLabel>
+                      <FormControl>
+                        <Input type="number" placeholder="0" {...field} value={field.value ?? ''} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="reorderPoint"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Reorder Point</FormLabel>
+                      <FormControl>
+                        <Input type="number" placeholder="0" {...field} value={field.value ?? ''}/>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
               <FormField
                 control={form.control}
@@ -304,12 +387,12 @@ export default function EditProductPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Category</FormLabel>
-                    <Select 
-                      onValueChange={field.onChange} 
-                      value={typeof field.value === 'string' ? field.value : ''} // Ensure value is always a string
+                    <Select
+                      onValueChange={field.onChange}
+                      value={typeof field.value === 'string' ? field.value : ''}
                     >
                       <FormControl>
-                        <SelectTrigger ref={field.ref}> {/* react-hook-form ref for focus/validation */}
+                        <SelectTrigger ref={field.ref}>
                           <SelectValue placeholder="Select a category" />
                         </SelectTrigger>
                       </FormControl>
@@ -358,7 +441,7 @@ export default function EditProductPage() {
                         {dm.progress !== undefined && dm.progress > 0 && dm.progress < 100 && (
                           <Progress value={dm.progress} className="h-2 mt-1" />
                         )}
-                        {dm.progress === 100 && !dm.error && <p className="text-green-600 text-xs mt-1">Ready for B2 upload</p>}
+                        {dm.progress === 100 && !dm.error && <p className="text-green-600 text-xs mt-1">Uploaded to B2</p>}
                         {dm.error && <p className="text-red-600 text-xs mt-1">{dm.error}</p>}
                       </div>
                     ))}
@@ -377,7 +460,7 @@ export default function EditProductPage() {
                             <NextImage 
                               src={dm.url} alt={`Preview for ${dm.id}`} layout="fill" objectFit="cover" 
                               className="rounded-md border" data-ai-hint="product item"
-                              unoptimized={dm.isNew} 
+                              unoptimized={dm.isNew || dm.url.startsWith('blob:')} // unoptimize blob URLs and new file previews
                               onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/100x100.png?text=Error'; }}
                             />
                           )}
@@ -406,5 +489,3 @@ export default function EditProductPage() {
     </div>
   );
 }
-
-    

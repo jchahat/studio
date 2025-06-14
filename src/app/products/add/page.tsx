@@ -18,7 +18,7 @@ import { useRouter } from 'next/navigation';
 import { PackagePlus, Loader2, DollarSign, Percent, UploadCloud, X, Video, Image as ImageIcon } from 'lucide-react';
 import NextImage from 'next/image';
 import { Progress } from "@/components/ui/progress";
-import { getB2UploadCredentialsAction, type B2UploadCredentials } from '@/actions/b2Actions';
+import { getB2UploadCredentialsAction } from '@/actions/b2Actions';
 import axios from 'axios';
 
 const productSchema = z.object({
@@ -29,18 +29,18 @@ const productSchema = z.object({
   stockLevel: z.coerce.number().int().min(0, { message: "Stock level must be a non-negative integer." }),
   reorderPoint: z.coerce.number().int().min(0, { message: "Reorder point must be a non-negative integer." }),
   category: z.string().min(1, { message: "Please select a category." }),
-  mediaUrls: z.array(z.string()).optional().default([]), // Will store B2 public URLs
+  mediaUrls: z.array(z.string().url({message: "Each media URL must be a valid URL."})).optional().default([]), 
 });
 
 const categories = ["Electronics", "Clothing", "Books", "Home Goods", "Groceries", "Toys", "Sports", "Beauty", "Automotive", "Garden", "Other"];
 
 type StagedFile = {
   file: File;
-  id: string; // For tracking progress
+  id: string; 
   previewUrl: string;
   type: 'image' | 'video';
   progress: number;
-  b2Url?: string; // Store the final B2 URL here
+  b2Url?: string; 
   error?: string;
 };
 
@@ -50,7 +50,7 @@ export default function AddProductPage() {
   const router = useRouter();
   
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
-  const [isUploadingGlobal, setIsUploadingGlobal] = useState(false); // For overall form submission state
+  const [isUploadingGlobal, setIsUploadingGlobal] = useState(false); 
 
   const form = useForm<z.infer<typeof productSchema>>({ 
     resolver: zodResolver(productSchema),
@@ -82,7 +82,6 @@ export default function AddProductPage() {
 
   const removeMedia = (id: string) => {
     setStagedFiles(prev => prev.filter(sf => sf.id !== id));
-    // If all files are removed, clear the file input value
     const fileInput = document.getElementById('media-upload') as HTMLInputElement;
     if (fileInput && stagedFiles.filter(sf => sf.id !== id).length === 0 ) {
         fileInput.value = ""; 
@@ -93,12 +92,12 @@ export default function AddProductPage() {
     try {
       const b2Creds = await getB2UploadCredentialsAction(stagedFile.file.name);
       
-      const response = await axios.post(b2Creds.uploadUrl, stagedFile.file, {
+      await axios.post(b2Creds.uploadUrl, stagedFile.file, {
         headers: {
           'Authorization': b2Creds.authToken,
           'X-Bz-File-Name': b2Creds.finalFileName,
           'Content-Type': stagedFile.file.type,
-          'X-Bz-Content-Sha1': 'do_not_verify', // For simplicity in this example
+          'X-Bz-Content-Sha1': 'do_not_verify', 
         },
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
@@ -107,7 +106,6 @@ export default function AddProductPage() {
           }
         },
       });
-      // Construct public URL
       const publicUrl = `${b2Creds.publicFileUrlBase}/${b2Creds.finalFileName}`;
       setStagedFiles(prev => prev.map(sf => sf.id === stagedFile.id ? {...sf, b2Url: publicUrl, progress: 100} : sf));
       return publicUrl;
@@ -125,7 +123,10 @@ export default function AddProductPage() {
 
     try {
       if (stagedFiles.length > 0) {
-        const uploadPromises = stagedFiles.map(sf => uploadFileToB2(sf));
+        const uploadPromises = stagedFiles.map(sf => {
+          if (sf.b2Url) return Promise.resolve(sf.b2Url); // Already uploaded (e.g. if submit failed before)
+          return uploadFileToB2(sf);
+        });
         uploadedUrls = await Promise.all(uploadPromises);
       }
       
@@ -210,7 +211,7 @@ export default function AddProductPage() {
                       <FormControl>
                         <div className="relative">
                            <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                           <Input type="number" step="0.01" placeholder="0.00" {...field} className="pl-8" />
+                           <Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} className="pl-8" />
                         </div>
                       </FormControl>
                       <FormMessage />
@@ -226,7 +227,7 @@ export default function AddProductPage() {
                       <FormControl>
                         <div className="relative">
                            <Percent className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                           <Input type="number" step="1" placeholder="0" {...field} className="pl-8" />
+                           <Input type="number" step="1" placeholder="0" {...field} value={field.value ?? ''} className="pl-8" />
                         </div>
                       </FormControl>
                        <FormDescription>Enter a value between 0 and 100.</FormDescription>
@@ -243,7 +244,7 @@ export default function AddProductPage() {
                     <FormItem>
                       <FormLabel>Initial Stock Level</FormLabel>
                       <FormControl>
-                        <Input type="number" placeholder="0" {...field} />
+                        <Input type="number" placeholder="0" {...field} value={field.value ?? ''} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -256,7 +257,7 @@ export default function AddProductPage() {
                     <FormItem>
                       <FormLabel>Reorder Point</FormLabel>
                       <FormControl>
-                        <Input type="number" placeholder="0" {...field} />
+                        <Input type="number" placeholder="0" {...field} value={field.value ?? ''} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -269,9 +270,9 @@ export default function AddProductPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Category</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={typeof field.value === 'string' ? field.value : ''} >
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger ref={field.ref}>
                           <SelectValue placeholder="Select a category" />
                         </SelectTrigger>
                       </FormControl>
@@ -320,7 +321,7 @@ export default function AddProductPage() {
                         {sf.progress > 0 && sf.progress < 100 && (
                           <Progress value={sf.progress} className="h-2 mt-1" />
                         )}
-                        {sf.b2Url && <p className="text-green-600 text-xs mt-1">Uploaded!</p>}
+                        {sf.b2Url && <p className="text-green-600 text-xs mt-1">Uploaded to B2!</p>}
                         {sf.error && <p className="text-red-600 text-xs mt-1">{sf.error}</p>}
                       </div>
                     ))}
